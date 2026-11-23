@@ -301,9 +301,11 @@ function viewToday() {
     ${tile('Stato di salute', 'medkit', C.LIGHT[h.light].color, `<span style="font-size:18px">${esc(h.label)}</span>`, '', h.items.filter(i => !i.normal).map(i => i.name).join(', ') || h.items.map(i => i.name).join(' · '), 'salute')}
   </div>`);
   // sonnellini
-  const naps = (t?.key === k ? t?.naps : null) || [];
-  out.push(`<section class="card"><div class="row link" data-act="naps"><span style="color:var(--indigo)">${ic('bed')}</span><div class="grow"><div class="strong">${naps.length ? (naps.length === 1 ? '1 sonnellino oggi' : `${naps.length} sonnellini oggi`) : 'Nessun sonnellino oggi'}</div>
-    <div class="sub mono">${naps.length ? naps.map(n => `${hhmm(n.start)}–${hhmm(n.end)} · ${durata(Math.round((n.end - n.start) / 60e3))}`).join('<br>') : 'Registrati dalla CIRQA: tocca per vedere gli ultimi giorni'}</div></div>${ic('chevron-forward', 'chev')}</div></section>`);
+  const naps = (t?.key === k ? t?.naps : null) || [], napMin = t?.key === k ? t?.napMin || 0 : 0;
+  // Garmin a volte dà solo i minuti totali dei sonnellini, senza orari
+  const napN = naps.length || (napMin > 0 ? Math.max(1, t?.napCount || 1) : 0);
+  out.push(`<section class="card"><div class="row link" data-act="naps"><span style="color:var(--indigo)">${ic('bed')}</span><div class="grow"><div class="strong">${napN ? (napN === 1 ? '1 sonnellino oggi' : `${napN} sonnellini oggi`) : 'Nessun sonnellino oggi'}</div>
+    <div class="sub mono">${naps.length ? naps.map(n => `${hhmm(n.start)}–${hhmm(n.end)} · ${durata(Math.round((n.end - n.start) / 60e3))}`).join('<br>') : napMin ? `${durata(napMin)} in tutto` : 'Registrati dalla CIRQA: tocca per vedere gli ultimi giorni'}</div></div>${ic('chevron-forward', 'chev')}</div></section>`);
   // decisione
   const w = dec.workout;
   let hero = `<div class="hero-top"><div class="ring">${ring((rec.recovery || 0) / 100, L.color)}<div class="rv"><b>${rec.recovery ?? '–'}</b><span>${rec.source === 'coach' ? 'prontezza' : 'stima'}</span></div></div>
