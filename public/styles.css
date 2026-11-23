@@ -241,3 +241,6 @@ h1, h2, h3 { font-family: var(--f-title); margin: 0; letter-spacing: -.01em; }
 .part i b { display: block; height: 100%; border-radius: 3px; }
 .part em { font-style: normal; font-weight: 700; color: var(--ink); text-align: right; }
 .part small { font-size: 10.5px; color: var(--muted); }
+
+.tile.link { cursor: pointer; }
+.tile.link:active { opacity: .7; }

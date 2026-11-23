@@ -146,7 +146,7 @@ const refreshBtn = `<button id="refreshBtn" class="icon-btn" data-act="refresh" 
 // ---------- componenti ----------
 const card = (title, icon, body, extra = '') => `<section class="card" ${extra}>${title ? `<div class="card-title">${ic(icon)}${esc(title)}</div>` : ''}${body}</section>`;
 const bullet = (t, icon = 'checkmark-circle', color = 'var(--accent)') => `<div class="bullet"><span style="color:${color}">${ic(icon)}</span><span>${esc(t)}</span></div>`;
-const tile = (title, icon, color, val, unit, det) => `<div class="tile"><div class="t-head"><span style="color:${color}">${ic(icon)}</span>${esc(title)}</div><div class="t-val">${val ?? '–'}${val != null && unit ? `<small>${unit}</small>` : ''}</div>${det ? `<div class="t-det">${esc(det)}</div>` : ''}</div>`;
+const tile = (title, icon, color, val, unit, det, info) => `<div class="tile${info ? ' link' : ''}"${info ? ` data-act="info" data-id="${info}" role="button"` : ''}><div class="t-head"><span style="color:${color}">${ic(icon)}</span>${esc(title)}</div><div class="t-val">${val ?? '–'}${val != null && unit ? `<small>${unit}</small>` : ''}</div>${det ? `<div class="t-det">${esc(det)}</div>` : ''}</div>`;
 function ring(value, color, size = 100, w = 11) {
   const r = (size - w) / 2, c = 2 * Math.PI * r, v = Math.max(0, Math.min(1, value || 0));
   return `<svg viewBox="0 0 ${size} ${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--fill)" stroke-width="${w}"/><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round" stroke-dasharray="${c * v} ${c}"/></svg>`;
@@ -190,12 +190,12 @@ function viewToday() {
   // essenziali Garmin
   const bbDet = t?.bbTime ? `dato CIRQA delle ${hhmm(t.bbTime)}` : t?.bbCharged != null ? `+${t.bbCharged} stanotte` : '';
   out.push(`<div class="grid2">
-    ${tile('Body Battery', 'battery-half', '#30b0c7', t?.key === k ? t?.bodyBatteryNow : null, '', bbDet)}
-    ${tile('Sonno', 'moon', '#5856d6', t?.sleepScore, '/100', t?.sleepHours != null ? C.hm(t.sleepHours) : '')}
-    ${tile('HRV notturna', 'pulse', '#ff2d55', t?.hrv, 'ms', t?.hrvLow != null ? `fascia ${t.hrvLow}–${t.hrvHigh}${t.hrvStatus ? ' · ' + hrvStatus(t.hrvStatus) : ''}` : '')}
-    ${tile('Sonno ristoratore', 'bed', '#5856d6', t?.deepMin != null && t?.remMin != null ? C.hm((t.deepMin + t.remMin) / 60) : null, '', t?.deepMin != null ? `profondo ${t.deepMin}' · REM ${t.remMin}'` : '')}
-    ${tile('FC a riposo', 'heart', '#ff3b30', t?.restingHR, 'bpm', t?.stressAvg != null ? `stress medio ${t.stressAvg}` : '')}
-    ${tile('Stato di salute', 'medkit', C.LIGHT[h.light].color, `<span style="font-size:18px">${esc(h.label)}</span>`, '', h.items.filter(i => !i.normal).map(i => i.name).join(', ') || h.items.map(i => i.name).join(' · '))}
+    ${tile('Body Battery', 'battery-half', '#30b0c7', t?.key === k ? t?.bodyBatteryNow : null, '', bbDet, 'bb')}
+    ${tile('Sonno', 'moon', '#5856d6', t?.sleepScore, '/100', t?.sleepHours != null ? C.hm(t.sleepHours) : '', 'sonno')}
+    ${tile('HRV notturna', 'pulse', '#ff2d55', t?.hrv, 'ms', t?.hrvLow != null ? `fascia ${t.hrvLow}–${t.hrvHigh}${t.hrvStatus ? ' · ' + hrvStatus(t.hrvStatus) : ''}` : '', 'hrv')}
+    ${tile('Sonno ristoratore', 'bed', '#5856d6', t?.deepMin != null && t?.remMin != null ? C.hm((t.deepMin + t.remMin) / 60) : null, '', t?.deepMin != null ? `profondo ${t.deepMin}' · REM ${t.remMin}'` : '', 'ristoratore')}
+    ${tile('FC a riposo', 'heart', '#ff3b30', t?.restingHR, 'bpm', t?.stressAvg != null ? `stress medio ${t.stressAvg}` : '', 'fc')}
+    ${tile('Stato di salute', 'medkit', C.LIGHT[h.light].color, `<span style="font-size:18px">${esc(h.label)}</span>`, '', h.items.filter(i => !i.normal).map(i => i.name).join(', ') || h.items.map(i => i.name).join(' · '), 'salute')}
   </div>`);
   // sonnellini
   const naps = (t?.key === k ? t?.naps : null) || [];
@@ -511,6 +511,73 @@ function viewAccount() {
   };
 }
 
+// ---------- spiegazione dei dati ----------
+/** La tua fascia normale: media ± 1 deviazione standard delle 4 settimane prima di oggi. */
+function myRange(get, k) {
+  const xs = DATA.days.filter(d => d.key < k).slice(-28).map(get).filter(v => v != null && isFinite(v));
+  if (xs.length < 7) return null;
+  const m = xs.reduce((a, b) => a + b, 0) / xs.length, sd = Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / (xs.length - 1));
+  return { mean: m, lo: m - sd, hi: m + sd, n: xs.length };
+}
+function openInfo(id) {
+  const k = C.today(), t = DATA.days.find(d => d.key === k) || DATA.days[DATA.days.length - 1] || {};
+  const f = (v, d = 0) => (v == null ? '–' : C.f1(v, d));
+  // verdetto di oggi rispetto alla tua fascia; better = 'alto' se più alto è meglio
+  const verdict = (v, r, better, fmt = x => f(x)) => {
+    if (v == null || !r) return '';
+    const inRange = v >= r.lo && v <= r.hi, good = better === 'alto' ? v > r.hi : v < r.lo;
+    const [txt, col] = inRange ? ['nella tua norma', 'var(--accent)'] : good ? ['meglio del solito', 'var(--accent)'] : ['peggio del solito', 'var(--orange)'];
+    return `<div class="banner ${col === 'var(--accent)' ? 'info' : ''}"><b>Oggi ${fmt(v)}: ${txt}.</b> La tua fascia normale (ultime ${r.n} notti) va da ${fmt(r.lo)} a ${fmt(r.hi)}, media ${fmt(r.mean)}.</div>`;
+  };
+  const S = (title, ...p) => `<section class="card"><div class="card-title">${title}</div><div class="sub" style="display:flex;flex-direction:column;gap:8px">${p.map(x => `<p style="margin:0">${x}</p>`).join('')}</div></section>`;
+  let title, body;
+  if (id === 'bb') {
+    const r = myRange(d => d.bbHigh, k);
+    title = 'Body Battery';
+    body = (t.bodyBatteryNow != null ? `<div class="banner info"><b>Adesso ${t.bodyBatteryNow}</b>${t.bbTime ? ` (dato CIRQA delle ${hhmm(t.bbTime)})` : ''}${t.bbCharged != null ? ` · stanotte +${t.bbCharged}` : ''}${t.bbHigh != null ? ` · massimo di oggi ${t.bbHigh}` : ''}.</div>` : '')
+      + (r ? `<div class="banner info">Il tuo massimo del mattino di solito sta fra ${f(r.lo)} e ${f(r.hi)} (media ${f(r.mean)}).</div>` : '')
+      + S('Cosa misura', "L'energia di riserva del corpo da 0 a 100: si ricarica con sonno e riposo e si scarica con attività, stress e giornate lunghe. Garmin la calcola da HRV, stress e attività.")
+      + S('Valori di riferimento', '<b>Al risveglio:</b> 75–100 ottimo, 50–74 discreto, sotto 50 la notte non ti ha ricaricato.', '<b>Ricarica notturna:</b> +50 o più è buona; sotto +30 hai dormito poco o male.', '<b>Durante il giorno:</b> sotto 25 sei in riserva: niente allenamenti intensi, meglio un sonnellino o andare a letto presto.')
+      + S('Come la usa il coach', 'Non entra nel punteggio di Prontezza (cambia troppo durante il giorno), ma Gemini la riceve quando programma la corsa.');
+  } else if (id === 'sonno') {
+    const rs = myRange(d => d.sleepScore, k), rh = myRange(d => d.sleepHours, k);
+    title = 'Sonno';
+    body = verdict(t.sleepScore, rs, 'alto') + verdict(t.sleepHours, rh, 'alto', v => C.hm(v))
+      + S('Cosa misura', 'Il punteggio Garmin (0–100) unisce durata, fasi del sonno (profondo, leggero, REM), risvegli e stress notturno.')
+      + S('Valori di riferimento', '<b>Punteggio:</b> 90–100 eccellente, 80–89 buono, 60–79 discreto, sotto 60 scarso.', '<b>Durata:</b> per un adulto che si allena 7–9 ore. Sotto le 6 ore per 2 notti su 3 il coach blocca l\'intensità.', `<b>Efficienza</b> (tempo dormito / tempo a letto): sopra 85% è buona${t.sleepEfficiency ? `; stanotte ${t.sleepEfficiency}%` : ''}.`)
+      + S('Come la usa il coach', 'Durata ed efficienza entrano nella parte "Notte" della Prontezza; le ultime 3 notti nel debito di sonno della "Tendenza".');
+  } else if (id === 'hrv') {
+    const r = myRange(d => d.hrv, k);
+    title = 'HRV notturna';
+    body = verdict(t.hrv, r, 'alto', v => f(v) + ' ms')
+      + (t.hrvLow != null ? `<div class="banner info">Fascia "bilanciata" calcolata da Garmin: ${t.hrvLow}–${t.hrvHigh} ms${t.hrvWeekly ? ` · media 7 giorni ${t.hrvWeekly} ms` : ''}${t.hrvStatus ? ` · stato ${hrvStatus(t.hrvStatus)}` : ''}.</div>` : '')
+      + S('Cosa misura', 'La variabilità del battito durante la notte (in millisecondi): quanto il sistema nervoso è "rilassato". Più alta rispetto al tuo solito = recupero migliore.')
+      + S('Il valore corretto', '<b>Non esiste un numero giusto per tutti:</b> dipende da età, genetica e dispositivo (fra adulti va da 20 a oltre 100 ms). Conta solo il confronto con <b>la tua</b> media.', '<b>Segnali da guardare:</b> un singolo giorno basso conta poco; la media di 7 giorni sotto la tua norma per più giorni indica fatica accumulata, stress o un malanno in arrivo. HRV bassa insieme a FC a riposo alta è il segnale più affidabile che non hai recuperato.')
+      + S('Come la usa il coach', 'È il dato più importante: pesa quasi metà della "Notte" e tutta la "Tendenza" della Prontezza.');
+  } else if (id === 'ristoratore') {
+    const tot = t.sleepHours ? t.sleepHours * 60 : null, rd = myRange(d => d.deepMin != null && d.remMin != null ? (d.deepMin + d.remMin) / 60 : null, k);
+    title = 'Sonno ristoratore';
+    body = verdict(t.deepMin != null && t.remMin != null ? (t.deepMin + t.remMin) / 60 : null, rd, 'alto', v => C.hm(v))
+      + (tot && t.deepMin != null ? `<div class="banner info">Stanotte: profondo ${t.deepMin}' (${Math.round(t.deepMin / tot * 100)}%) · REM ${t.remMin}' (${Math.round(t.remMin / tot * 100)}%).</div>` : '')
+      + S('Cosa misura', '<b>Sonno profondo:</b> recupero fisico di muscoli e tendini, ormone della crescita. <b>REM:</b> recupero mentale, memoria, umore.')
+      + S('Valori di riferimento', '<b>Profondo:</b> 13–23% del sonno (circa 1–1,5 h su 7–8 h). <b>REM:</b> 20–25% (circa 1,5–2 h). Insieme di solito 2–3 ore a notte.', 'Il sonno profondo è soprattutto a inizio notte, il REM verso il mattino: andare a letto tardi taglia il profondo, svegliarsi presto taglia il REM.', 'I valori di braccialetti e orologi sono stime: guarda la tendenza, non la singola notte.');
+  } else if (id === 'fc') {
+    const r = myRange(d => d.restingHR, k);
+    title = 'FC a riposo';
+    body = verdict(t.restingHR, r, 'basso', v => f(v) + ' bpm')
+      + S('Cosa misura', 'Il battito più basso della giornata, di solito durante il sonno.')
+      + S('Valori di riferimento', '<b>Adulti:</b> 60–80 bpm normale; <b>sportivi allenati:</b> 45–60 bpm. Scende man mano che migliori la forma.', '<b>Rispetto alla tua media:</b> +3–5 bpm per uno o due giorni = fatica, poco sonno, alcol o caldo; +5 bpm o più per diversi giorni, soprattutto con HRV bassa = possibile malanno: riposo.')
+      + S('Come la usa il coach', 'Pesa un quarto della "Notte" della Prontezza ed è uno dei campanelli d\'allarme insieme a HRV e respirazione.');
+  } else {
+    const h = C.health(t, DATA.days);
+    title = 'Stato di salute';
+    body = `<div class="list">${h.items.map(i => `<div class="li"><span style="color:${i.normal ? 'var(--accent)' : 'var(--orange)'}">${ic(i.normal ? 'checkmark-circle' : 'warning')}</span><div class="grow">${esc(i.name)}</div><b>${esc(i.value)}</b></div>`).join('') || '<div class="li sub">Servono almeno 7 giorni di dati</div>'}</div>`
+      + S('Cosa misura', 'Una stima dell\'app (Garmin non la espone): controlla se HRV, FC a riposo, respirazione e stress notturno di stanotte sono dentro la tua fascia normale delle ultime 4 settimane.')
+      + S('Valori di riferimento', '<b>Nella norma:</b> tutto a posto. <b>1 fuori norma:</b> capita, guarda come ti senti. <b>2 o più fuori norma</b> (soprattutto FC alta + HRV bassa + respirazione alta): il corpo sta combattendo qualcosa, oggi riposo.');
+  }
+  sheet(title, body + '<p class="tiny" style="margin:0 4px">Valori indicativi per adulti sportivi amatori, non un parere medico.</p>');
+}
+
 // ---------- MyWhoosh ----------
 async function loadMyWhoosh() {
   const acc = MW.account(DATA);
@@ -599,6 +666,7 @@ document.addEventListener('click', async e => {
   if (a === 'mwupload') return mwUpload();
   if (a === 'mwlib') return mwLibrary();
   if (a === 'naps') return openNaps();
+  if (a === 'info') return openInfo(t.dataset.id);
   if (a === 'prontezza') return sheet('Prontezza', `<section class="card"><div class="sub" style="display:flex;flex-direction:column;gap:10px">
     <p style="margin:0"><b>Notte (40%)</b> — come fa WHOOP: HRV, FC a riposo, sonno, respirazione e stress di stanotte confrontati con le tue ultime 4 settimane. Vede subito una notte storta, ma da sola è ballerina.</p>
     <p style="margin:0"><b>Tendenza (25%)</b> — media dell'HRV degli ultimi 7 giorni rispetto alle 4 settimane prima, meno il debito di sonno delle ultime 3 notti. È il metodo usato negli studi sull'allenamento guidato dall'HRV: conta la media, non il singolo giorno.</p>
