@@ -279,3 +279,11 @@ details.ins summary svg.ion { width: 18px; height: 18px; }
 .laps > :nth-child(6n+1) { text-align: left; }
 details.card > summary { list-style: none; }
 details.card > summary::-webkit-details-marker { display: none; }
+
+/* iPhone (Safari): i blocchi della finestra non devono restringersi, si scorre */
+.sheet > *, #view > * { flex-shrink: 0; }
+.sheet { max-height: 88dvh; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+/* campi di testo a 16px: Safari non ingrandisce la pagina quando li tocchi */
+input, select, textarea { font-size: 16px; }
+.field input[type=text], .field input[type=email], .field input[type=password], .field input[type=number] { min-height: 38px; line-height: 1.25; }
+.gbtn .tiny { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

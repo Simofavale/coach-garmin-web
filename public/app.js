@@ -732,7 +732,7 @@ function viewActivities() {
     const extra = groupSteps(g) ? footDays(k0, k1).reduce((s, d) => s + d.extra, 0) : 0;
     const t = totals(acts.filter(a => g.types.includes(a.type)), extra);
     return `<div class="gbtn" style="--gc:${g.color}" data-act="group" data-i="${i}"><button class="gedit" data-act="groupedit" data-i="${i}" aria-label="Modifica il pulsante">${ic('ellipsis-horizontal')}</button>
-      <div class="gname">${ic(g.icon)}${esc(g.name)}</div><div class="gkm"><b class="mono">${kmf(t.km)}</b> km</div><div class="tiny">${t.n} attività · ${hmin(t.min)} · +${Math.round(t.up)} m</div></div>`;
+      <div class="gname">${ic(g.icon)}${esc(g.name)}</div><div class="gkm"><b class="mono">${kmf(t.km)}</b> km</div><div class="tiny">${t.n} attività · ${hmin(t.min)}</div><div class="tiny">+${Math.round(t.up).toLocaleString('it-IT')}&nbsp;m di dislivello</div></div>`;
   };
   out.push(`<section class="card">${periodPicker()}<div class="row"><span class="tiny grow">${C.pretty(k0, 'year')} – ${C.pretty(k1, 'year')}</span><b class="tiny" style="color:var(--ink)">${acts.length} attività</b></div>
     <div class="grid2">${gs.map(btn).join('')}</div></section>`);
