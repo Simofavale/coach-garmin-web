@@ -28,8 +28,8 @@ try {
     }
     out({ id: req.id, tipo: 'garmin', ok: true, msg: 'Garmin collegato: i tuoi dati arrivano adesso.' });
   } else if (req.tipo === 'mywhoosh') {
-    const { exp } = await loginMyWhoosh(String(req.email || '').trim(), String(req.password || ''));
-    out({ id: req.id, tipo: 'mywhoosh', ok: true, msg: 'MyWhoosh collegato' + (exp ? `, valido fino al ${new Date(exp).toLocaleDateString('it-IT')}` : '') + '.' });
+    const { exp, n } = await loginMyWhoosh(String(req.email || '').trim(), String(req.password || ''));
+    out({ id: req.id, tipo: 'mywhoosh', ok: true, msg: 'MyWhoosh collegato' + (n != null ? ` (${n} allenamenti salvati)` : '') + (exp ? `, valido fino al ${new Date(exp).toLocaleDateString('it-IT')}` : '') + '.' });
   } else throw new Error('Richiesta sconosciuta.');
 } catch (e) {
   out({ id: req.id, tipo: req.tipo, ok: false, msg: e.message + (req.tipo === 'garmin' && !req.email ? ' Il codice vale pochi minuti e una volta sola: rifai l\'accesso a Garmin.' : '') });

@@ -417,21 +417,30 @@ export async function sync({ days = 3 } = {}) {
 /** Token MyWhoosh (cifrato): va alla web app dentro i dati cifrati. */
 export const loadMyWhoosh = () => readEnc(path.join(ROOT, 'data', 'mywhoosh.enc.json'));
 
-/** Accesso a MyWhoosh con email e password (non salvate): si conserva solo il token, cifrato. */
+/**
+ * Accesso a MyWhoosh con email e password (non salvate): si conserva solo il token, cifrato.
+ * Usa l'accesso dell'app MyWhoosh (services.mywhoosh.com), che non ha il controllo reCAPTCHA del sito;
+ * poi verifica che il codice valga anche per la libreria degli allenamenti (coaching.mywhoosh.com).
+ */
 export async function loginMyWhoosh(email, password) {
-  const r = await fetch('https://event.mywhoosh.com/api/auth/login', {
-    method: 'POST', signal: AbortSignal.timeout(30e3),
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Origin: 'https://workout.mywhoosh.com', Referer: 'https://workout.mywhoosh.com/' },
-    body: JSON.stringify({ email, password, token: '' }),
+  const r = await fetch('https://services.mywhoosh.com/http-service/api/login', {
+    method: 'POST', signal: AbortSignal.timeout(30e3), headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ Username: email, Password: password, Platform: 'Android', Action: 1001, CorrelationId: crypto.randomUUID(), DeviceId: crypto.randomUUID(), Authorization: '' }),
   });
   const j = await r.json().catch(() => ({}));
-  const token = j?.token || j?.data?.token;
-  if (!r.ok || !token) throw new Error(`MyWhoosh non ha accettato l'accesso (${j?.message || 'HTTP ' + r.status}). Ricontrolla email e password.`);
+  if (!j?.Success || !j?.AccessToken) throw new Error(/incorrect|invalid/i.test(j?.Message || '') ? 'Email o password MyWhoosh non corrette.' : `MyWhoosh non ha accettato l'accesso (${j?.Message || 'HTTP ' + r.status}).`);
+  const token = j.AccessToken;
   const claim = k => { try { return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())[k]; } catch { return undefined; } };
-  const userId = j?.user?.whoosh_user_id ?? j?.data?.user?.whoosh_user_id ?? claim('userId');
   const exp = claim('exp') ? claim('exp') * 1000 : null;
-  writeEnc(path.join(ROOT, 'data', 'mywhoosh.enc.json'), { token, userId: userId != null ? String(userId) : null, exp });
-  return { exp };
+  const userId = j.WhooshId ?? claim('userId') ?? claim('whoosh_user_id');
+  // il codice vale per la libreria allenamenti?
+  const t = await fetch('https://coaching.mywhoosh.com/api/v2/workout-builder/my-workouts', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal: AbortSignal.timeout(30e3) });
+  const lib = await t.json().catch(() => ({}));
+  const n = Array.isArray(lib?.data) ? lib.data.length : null;
+  console.log(`  MyWhoosh: accesso app riuscito, libreria allenamenti HTTP ${t.status}`);
+  if (!t.ok) throw new Error(`Accesso a MyWhoosh riuscito, ma la libreria degli allenamenti non accetta questo codice (HTTP ${t.status}): serve un'altra strada, avvisa Claude.`);
+  writeEnc(path.join(ROOT, 'data', 'mywhoosh.enc.json'), { token, refreshToken: j.RefreshToken || null, userId: userId != null ? String(userId) : null, exp });
+  return { exp, n };
 }
 
 /** Esito dell'ultimo collegamento chiesto dalla web app (stesso giro di GitHub Actions). */
