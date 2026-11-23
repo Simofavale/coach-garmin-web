@@ -545,30 +545,134 @@ function openDoses() {
   };
 }
 
-// ---------- ATTIVITÀ ----------
+// ---------- ATTIVITÀ (come l'app iPhone: periodo, due pulsanti, dettaglio, record) ----------
+const PERIODS = [['week', 'Sett.'], ['month', 'Mese'], ['year', 'Anno'], ['two', '2 anni'], ['all', 'Sempre'], ['custom', 'Date']];
+const DEF_GROUPS = [
+  { name: 'In bici', icon: 'bicycle', types: ['Gravel', 'Bici', 'Rulli', 'MTB', 'Ciclismo virtuale'], color: '#33c78c' },
+  { name: 'A piedi', icon: 'walk', types: ['Camminata', 'Escursione', 'Corsa'], color: '#ff9500' },
+];
+const ST = Object.assign({ period: 'year', from: C.addDays(C.today(), -30), to: C.today() }, store.get('coachgarmin:stats', {}));
+const saveST = () => store.set('coachgarmin:stats', ST);
+const groups = () => (U.groups || DEF_GROUPS).map((g, i) => ({ ...DEF_GROUPS[i], ...g }));
+const isFoot = a => /cammin|walk|escurs|hik|corsa|run/i.test(a.type);
+const groupSteps = g => g.types.some(t => /cammin|escurs|corsa|walk|hik|run/i.test(t));
+function interval() {
+  const k = C.today();
+  if (ST.period === 'custom') return [ST.from < ST.to ? ST.from : ST.to, ST.from < ST.to ? ST.to : ST.from];
+  const start = ST.period === 'week' ? C.startOfWeek(k) : ST.period === 'month' ? k.slice(0, 8) + '01' : ST.period === 'year' ? k.slice(0, 5) + '01-01'
+    : ST.period === 'two' ? C.addDays(k, -730) : (DATA.activities.map(a => a.key).sort()[0] || k);
+  return [start, k];
+}
+/** Km a piedi fuori dalle attività: passi del giorno meno camminate/corse registrate (come DailyFootKm). */
+function footDays(k0, k1) {
+  const out = {};
+  for (const d of DATA.days) if (d.key >= k0 && d.key <= k1) out[d.key] = { key: d.key, steps: (d.stepsDistance || 0) / 1000, act: 0 };
+  for (const a of DATA.activities) if (isFoot(a) && a.key >= k0 && a.key <= k1) { out[a.key] = out[a.key] || { key: a.key, steps: 0, act: 0 }; out[a.key].act += a.km || 0; }
+  return Object.values(out).map(d => ({ ...d, extra: Math.max(0, d.steps - d.act), total: d.act + Math.max(0, d.steps - d.act) })).filter(d => d.total > 0.05).sort((a, b) => (a.key < b.key ? 1 : -1));
+}
+function totals(acts, stepsKm = 0) {
+  const sum = f => acts.reduce((s, a) => s + (f(a) || 0), 0), max = f => { const v = acts.map(f).filter(x => x != null); return v.length ? Math.max(...v) : null; };
+  return { n: acts.length, km: sum(a => a.km) + stepsKm, stepsKm, min: sum(a => a.minutes), up: sum(a => a.elevationGain), down: sum(a => a.elevationLoss), vmax: max(a => a.maxSpeed != null ? a.maxSpeed * 3.6 : null), quota: max(a => a.maxElevation) };
+}
+const hmin = m => `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, '0')}`;
+const kmf = v => C.f1(v, v >= 100 ? 0 : 1);
+const actIcon = a => (C.isRide(a) ? 'bicycle' : C.isRun(a) || C.isWalk(a) ? 'walk' : 'fitness');
+const actColor = a => (C.isRide(a) ? '#34c759' : C.isRun(a) ? '#ff9500' : C.isWalk(a) ? '#ffcc00' : '#8e8e93');
+function periodPicker() {
+  return `<div class="seg">${PERIODS.map(([id, l]) => `<button class="${ST.period === id ? 'on' : ''}" data-period="${id}">${l}</button>`).join('')}</div>
+    ${ST.period === 'custom' ? `<div class="form"><div class="field"><input type="date" id="stFrom" value="${ST.from}" max="${C.today()}"><span class="tiny">→</span><input type="date" id="stTo" value="${ST.to}" max="${C.today()}"></div></div>` : ''}`;
+}
+function actRow(a) {
+  const met = [a.avgHR && `FC ${a.avgHR}`, a.avgPower && `${a.avgPower} W`, a.trainingEffect && `TE ${C.f1(a.trainingEffect)}`].filter(Boolean).join(' · ');
+  return `<div class="li link" data-act="actdetail" data-id="${esc(a.id)}"><div class="ico-c" style="background:${actColor(a)}">${ic(actIcon(a))}</div><div class="grow"><div class="ttl">${esc(a.garminName || a.type)}</div><div class="sub">${C.pretty(a.key)} · ${esc(a.type)}</div></div>
+    <div class="right"><div class="mono strong" style="font-size:14.5px">${a.km ? `${C.f1(a.km)} km` : `${a.minutes} min`}</div><div class="tiny">${a.km ? `${hmin(a.minutes)}${a.elevationGain ? ` · +${Math.round(a.elevationGain)} m` : ''}` : met}</div></div></div>`;
+}
 function viewActivities() {
   setHead('Attività', refreshBtn);
-  const acts = DATA.activities, k = C.today(), out = [];
-  const sum = (f, from) => acts.filter(a => a.key >= from && f(a)).reduce((s, a) => s + (a.km || 0), 0);
-  const ws = C.startOfWeek(k), ms = k.slice(0, 8) + '01', ys = k.slice(0, 5) + '01-01';
-  const feet = a => C.isWalk(a) || C.isRun(a);
-  const row = (label, f, color, icon) => `<div class="li"><div class="ico-c" style="background:${color}">${ic(icon)}</div><div class="grow"><div class="ttl">${label}</div></div>
-    <div class="stats3" style="gap:14px;text-align:right">${[['Settimana', ws], ['Mese', ms], ['Anno', ys]].map(([n, from]) => `<div><div class="k">${n}</div><div class="v mono">${Math.round(sum(f, from))} km</div></div>`).join('')}</div></div>`;
-  out.push(`<div class="list-h">Chilometri</div><div class="list">${row('In bici', C.isRide, '#34c759', 'bicycle')}${row('A piedi', feet, '#ff9500', 'walk')}</div>
-    <div class="list-foot">Somme delle attività registrate su Garmin (${acts.length} scaricate).</div>`);
+  const [k0, k1] = interval(), acts = DATA.activities.filter(a => a.key >= k0 && a.key <= k1), out = [];
+  const gs = groups();
+  const btn = (g, i) => {
+    const extra = groupSteps(g) ? footDays(k0, k1).reduce((s, d) => s + d.extra, 0) : 0;
+    const t = totals(acts.filter(a => g.types.includes(a.type)), extra);
+    return `<div class="gbtn" style="--gc:${g.color}" data-act="group" data-i="${i}"><button class="gedit" data-act="groupedit" data-i="${i}" aria-label="Modifica il pulsante">${ic('ellipsis-horizontal')}</button>
+      <div class="gname">${ic(g.icon)}${esc(g.name)}</div><div class="gkm"><b class="mono">${kmf(t.km)}</b> km</div><div class="tiny">${t.n} attività · ${hmin(t.min)} · +${Math.round(t.up)} m</div></div>`;
+  };
+  out.push(`<section class="card">${periodPicker()}<div class="row"><span class="tiny grow">${C.pretty(k0, 'year')} – ${C.pretty(k1, 'year')}</span><b class="tiny" style="color:var(--ink)">${acts.length} attività</b></div>
+    <div class="grid2">${gs.map(btn).join('')}</div></section>`);
+  if (DATA.mwImport) out.push(`<div class="list-foot">MyWhoosh → Garmin: ultimo controllo ${ago(DATA.mwImport.at)}${DATA.mwImport.up ? `, ${DATA.mwImport.up} uscite caricate` : ', nessuna uscita nuova'}.</div>`);
   let month = '';
   const items = [];
-  for (const a of acts.slice(0, 150)) {
+  for (const a of acts.slice(0, 300)) {
     const m = a.key.slice(0, 7);
-    if (m !== month) { if (items.length) items.push('</div>'); month = m; const d = C.toDate(a.key); items.push(`<div class="list-h">${d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}</div><div class="list">`); }
-    const color = C.isRide(a) ? '#34c759' : C.isRun(a) ? '#ff9500' : C.isWalk(a) ? '#ffcc00' : '#8e8e93';
-    const met = [a.avgHR && `FC ${a.avgHR}`, a.avgPower && `${a.avgPower} W`, a.trainingEffect && `TE ${C.f1(a.trainingEffect)}`].filter(Boolean).join(' · ');
-    items.push(`<div class="li"><div class="ico-c" style="background:${color}">${ic(C.isRide(a) ? 'bicycle' : C.isRun(a) || C.isWalk(a) ? 'walk' : 'fitness')}</div><div class="grow"><div class="ttl">${esc(a.garminName || a.type)}</div><div class="sub">${C.pretty(a.key)} · ${esc(a.type)}</div></div>
-      <div class="right"><div class="mono strong" style="font-size:14.5px">${a.minutes} min${a.km ? ` · ${C.f1(a.km)} km` : ''}</div><div class="tiny">${met}</div></div></div>`);
+    if (m !== month) { if (items.length) items.push('</div>'); month = m; items.push(`<div class="list-h">${C.toDate(a.key).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}</div><div class="list">`); }
+    items.push(actRow(a));
   }
   if (items.length) items.push('</div>');
-  out.push(items.length ? items.join('') : '<div class="list"><div class="li sub">Nessuna attività scaricata</div></div>');
+  out.push(items.length ? items.join('') : '<div class="list"><div class="li sub">Nessuna attività nel periodo</div></div>');
+  if (acts.length > 300) out.push('<div class="list-foot">Mostrate le ultime 300 attività del periodo.</div>');
   $('#view').innerHTML = out.join('');
+  const f = $('#stFrom'), t = $('#stTo');
+  if (f) f.onchange = () => { ST.from = f.value; saveST(); route(); };
+  if (t) t.onchange = () => { ST.to = t.value; saveST(); route(); };
+}
+function records(acts) {
+  const out = [], add = (title, icon, f, fmt) => { let best = null; for (const a of acts) { const v = f(a); if (v != null && (!best || v > best[1])) best = [a, v]; } if (best) out.push({ title, icon, a: best[0], v: fmt(best[1]) }); };
+  add('Distanza più lunga', 'flag', a => (a.km > 0 ? a.km : null), v => `${C.f1(v)} km`);
+  add('Durata più lunga', 'time', a => (a.minutes > 0 ? a.minutes : null), hmin);
+  add('Più dislivello', 'trending-up', a => (a.elevationGain > 0 ? a.elevationGain : null), v => `+${Math.round(v)} m`);
+  add('Velocità media più alta', 'speedometer', a => (a.km >= (C.isRide(a) ? 10 : 3) && a.minutes >= 15 ? a.km / (a.minutes / 60) : null), v => `${C.f1(v)} km/h`);
+  add('Velocità massima', 'flash', a => (a.maxSpeed != null ? a.maxSpeed * 3.6 : null), v => `${C.f1(v)} km/h`);
+  add('Potenza media più alta (≥20′)', 'flash', a => (a.minutes >= 20 ? a.avgPower : null), v => `${v} W`);
+  add('Quota più alta', 'trending-up', a => a.maxElevation, v => `${Math.round(v)} m`);
+  return out;
+}
+function openGroup(i) {
+  const g = groups()[i], [k0, k1] = interval();
+  const acts = DATA.activities.filter(a => a.key >= k0 && a.key <= k1 && g.types.includes(a.type));
+  const days = groupSteps(g) ? footDays(k0, k1) : [];
+  const t = totals(acts, days.reduce((s, d) => s + d.extra, 0));
+  const counts = Object.entries(acts.reduce((m, a) => ((m[a.type] = (m[a.type] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1]);
+  const stat = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const rec = records(DATA.activities.filter(a => g.types.includes(a.type)));
+  sheet(g.name, `<div class="tiny" style="margin:0 4px">${C.pretty(k0, 'year')} – ${C.pretty(k1, 'year')} · <b>${acts.length} attività</b></div>
+    ${counts.length ? `<div class="chips">${counts.map(([ty, n]) => `<span class="chip">${esc(ty)} ${n}</span>`).join('')}</div>` : ''}
+    <section class="card"><div class="card-title">${ic('stats-chart')}Totali</div><div class="stats3" style="row-gap:12px">
+      ${stat('Distanza', `${kmf(t.km)} km`)}${stat('Tempo', hmin(t.min))}${stat('Attività', t.n)}
+      ${stat('Ascesa totale', `${Math.round(t.up)} m`)}${stat('Discesa totale', `${Math.round(t.down)} m`)}${stat('Quota max', t.quota != null ? `${Math.round(t.quota)} m` : '–')}
+      ${stat('Velocità max', t.vmax != null ? `${C.f1(t.vmax)} km/h` : '–')}${days.length ? stat('Media al giorno', `${C.f1(t.km / Math.max(1, days.length))} km`) : stat('Media/attività', acts.length ? `${C.f1((t.km - t.stepsKm) / acts.length)} km` : '–')}</div>
+      ${t.stepsKm > 0 ? `<div class="tiny">Di cui ${C.f1(t.stepsKm)} km di passi fuori dalle attività e ${C.f1(t.km - t.stepsKm)} km nelle attività registrate.</div>` : ''}</section>
+    ${days.length ? `<section class="card"><div class="card-title">${ic('walk')}Km a piedi per giorno</div>${days.slice(0, 60).map(d => `<div class="row"><span class="grow">${C.pretty(d.key)}</span><span class="tiny">attività ${C.f1(d.act)}</span><b class="mono" style="min-width:64px;text-align:right">${C.f1(d.total)} km</b></div>`).join('')}${days.length > 60 ? '<div class="tiny">Mostrati gli ultimi 60 giorni del periodo.</div>' : ''}</section>` : ''}
+    ${rec.length ? `<section class="card"><div class="card-title">${ic('trophy')}Record personali di sempre</div>${rec.map(r => `<div class="row link" data-act="actdetail" data-id="${esc(r.a.id)}"><span style="color:#ffcc00">${ic(r.icon)}</span><div class="grow"><div class="tiny">${r.title}</div><div class="tiny" style="color:var(--muted)">${esc(r.a.garminName || r.a.type)} · ${C.pretty(r.a.key, 'year')}</div></div><b class="mono">${r.v}</b></div>`).join('')}</section>` : ''}
+    <div class="list-h">Attività (${acts.length})</div><div class="list">${acts.slice(0, 200).map(actRow).join('') || '<div class="li sub">Nessuna</div>'}</div>`);
+}
+function openGroupEdit(i) {
+  const g = groups()[i], types = [...new Set(DATA.activities.map(a => a.type))].sort();
+  const icons = ['bicycle', 'walk', 'fitness', 'flag'];
+  sheet('Modifica pulsante', `<div class="form"><div class="field"><input type="text" class="wide" id="gName" value="${esc(g.name)}" style="max-width:none;width:100%"></div>
+    <div class="field">${icons.map(n => `<button class="icon-btn ${g.icon === n ? '' : ''}" data-gicon="${n}" style="${g.icon === n ? 'background:var(--accent);color:#fff' : ''}">${ic(n)}</button>`).join('')}</div></div>
+    <div class="form-h">Attività da sommare</div><div class="form">${types.map(ty => `<div class="field"><span>${esc(ty)} <span class="tiny">(${DATA.activities.filter(a => a.type === ty).length})</span></span>${sw('gt-' + ty.replace(/\W/g, '_'), g.types.includes(ty))}</div>`).join('')}</div>
+    <button class="btn plain" data-act="groupreset" data-i="${i}">Ripristina il pulsante predefinito</button>`, { right: 'Salva', left: 'Annulla' });
+  let icon = g.icon;
+  $('#modal').onclick = e => { const b = e.target.closest('[data-gicon]'); if (b) { icon = b.dataset.gicon; document.querySelectorAll('[data-gicon]').forEach(x => { x.style.background = x === b ? 'var(--accent)' : ''; x.style.color = x === b ? '#fff' : ''; }); } };
+  sheet.ok = () => {
+    const sel = types.filter(ty => $('#gt-' + ty.replace(/\W/g, '_'))?.checked);
+    const all = groups(); all[i] = { ...all[i], name: $('#gName').value.trim() || all[i].name, icon, types: sel };
+    U.groups = all; saveU(); closeSheet(); route();
+  };
+}
+function openActivity(id) {
+  const a = DATA.activities.find(x => x.id === id); if (!a) return;
+  const stat = (k, v) => (v == null || v === '' ? '' : `<div><div class="k">${k}</div><div class="v">${v}</div></div>`);
+  const speed = a.km && a.minutes ? a.km / (a.minutes / 60) : null;
+  const load = C.recentLoad(DATA.activities, C.addDays(a.key, 1));
+  sheet(a.garminName || a.type, `<div class="tiny" style="margin:0 4px">${C.pretty(a.key, 'long')}${a.startTime ? ` · ${hhmm(a.startTime)}` : ''} · ${esc(a.type)}</div>
+    <section class="card"><div class="stats3" style="row-gap:12px">
+      ${stat('Distanza', a.km ? `${C.f1(a.km)} km` : null)}${stat('Tempo', hmin(a.minutes))}${stat(C.isRide(a) ? 'Velocità media' : 'Ritmo', speed ? (C.isRide(a) ? `${C.f1(speed)} km/h` : `${Math.floor(60 / speed)}'${String(Math.round((60 / speed % 1) * 60)).padStart(2, '0')}"/km`) : null)}
+      ${stat('FC media', a.avgHR ? `${a.avgHR} bpm` : null)}${stat('Potenza media', a.avgPower ? `${a.avgPower} W` : null)}${stat('Training Effect', a.trainingEffect ? C.f1(a.trainingEffect) : null)}
+      ${stat('Carico', a.trainingLoad ? Math.round(a.trainingLoad) : null)}${stat('Dislivello', a.elevationGain ? `+${Math.round(a.elevationGain)} m` : null)}${stat('Velocità max', a.maxSpeed ? `${C.f1(a.maxSpeed * 3.6)} km/h` : null)}
+      ${stat('Quota max', a.maxElevation != null ? `${Math.round(a.maxElevation)} m` : null)}</div></section>
+    ${load.summary && load.level ? `<div class="banner">${esc(load.summary)}: il giorno dopo il coach ha proposto ${load.level === 2 ? 'recupero' : 'una seduta più leggera'}.</div>` : ''}
+    <a class="btn soft" href="https://connect.garmin.com/modern/activity/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${ic('pulse')}Apri in Garmin Connect</a>`);
 }
 
 // ---------- ACCOUNT ----------
@@ -766,13 +870,17 @@ function openRunAI() {
 
 // ---------- azioni ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-act],[data-kind],[data-mix],[data-week],[data-cat],[data-eat],[data-undo]');
+  const t = e.target.closest('[data-act],[data-kind],[data-mix],[data-week],[data-cat],[data-eat],[data-undo],[data-period]');
   if (!t) { if (e.target.id === 'modal') closeSheet(); return; }
   const a = t.dataset.act, k = C.today();
   if (a === 'close') return closeSheet();
   if (a === 'sheet-ok') return sheet.ok && sheet.ok();
   if (a === 'reload') return location.reload();
   if (a === 'refresh') return refreshNow();
+  if (a === 'group') { if (e.target.closest('.gedit')) return; return openGroup(+t.dataset.i); }
+  if (a === 'groupedit') return openGroupEdit(+t.dataset.i);
+  if (a === 'groupreset') { const g = U.groups || DEF_GROUPS.map(x => ({ ...x })); g[+t.dataset.i] = { ...DEF_GROUPS[+t.dataset.i] }; U.groups = g; saveU(); closeSheet(); return route(); }
+  if (a === 'actdetail') return openActivity(t.dataset.id);
   if (a === 'linkgarmin') return openLinkGarmin();
 
   if (a === 'linkmw') return openLinkMyWhoosh();
@@ -809,6 +917,7 @@ document.addEventListener('click', async e => {
   if (a === 'wipe') { if (confirm('Cancellare piano, check-in e dieta da questo dispositivo?')) { localStorage.removeItem(UKEY); localStorage.removeItem('coachgarmin:dieta'); location.reload(); } return; }
   if (t.dataset.kind && U.goal) { U.goal.kind = t.dataset.kind; saveU(); return route(); }
   if (t.dataset.mix && U.goal) { U.goal.mix = t.dataset.mix; saveU(); return route(); }
+  if (t.dataset.period) { ST.period = t.dataset.period; saveST(); return route(); }
   if (t.dataset.week) { weekOffset += +t.dataset.week; return route(); }
   if (t.dataset.cat) { dietCat = t.dataset.cat; return route(); }
   if (t.dataset.eat) { D.eat(DIET, t.dataset.eat); const it = D.item(DIET, t.dataset.eat); toast(`Segnato: ${it ? it.name : 'pasto libero'}`); return route(); }

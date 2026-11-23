@@ -7,7 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { ROOT, sync, publicData, loadCache, encrypt, localKeys, addDays, today, loadEsito, renewMyWhoosh } from './garmin.mjs';
+import { ROOT, sync, publicData, loadCache, encrypt, localKeys, addDays, today, loadEsito, renewMyWhoosh, importMyWhoosh, saveCache } from './garmin.mjs';
 
 const PORT = Number(process.env.PORT) || 5174;
 const PUB = path.join(ROOT, 'public');
@@ -54,8 +54,11 @@ async function refresh() {
 
 if (arg('--build')) {
   const out = path.resolve(process.argv[process.argv.indexOf('--build') + 1] || '_site');
-  const c = await sync({ days: 3 });
+  let c = await sync({ days: 3 });
   await renewMyWhoosh();
+  // uscite MyWhoosh su Garmin; se ne ha caricate, riprende subito le attività da Garmin
+  if (await importMyWhoosh(c)) { saveCache(c); await new Promise(r => setTimeout(r, 15e3)); c = await sync({ days: 1 }); }
+  else saveCache(c);
   // anche senza dati (Garmin non ancora collegato) il sito si pubblica: l'app mostra cosa fare
   if (!c.lastSync) console.warn('Nessun dato Garmin: pubblico il sito con il messaggio di errore.');
   const dataKey = process.env.DATA_KEY || localKeys().dataKey;

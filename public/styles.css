@@ -244,3 +244,13 @@ h1, h2, h3 { font-family: var(--f-title); margin: 0; letter-spacing: -.01em; }
 
 .tile.link { cursor: pointer; }
 .tile.link:active { opacity: .7; }
+
+/* pulsanti della scheda Attività */
+.gbtn { position: relative; border-radius: 14px; padding: 12px; background: color-mix(in srgb, var(--gc) 12%, transparent); cursor: pointer; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gbtn .gname { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--gc); padding-right: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gbtn .gname svg.ion { width: 16px; height: 16px; }
+.gbtn .gkm { font-size: 13px; color: var(--ink-2); }
+.gbtn .gkm b { font-family: var(--f-title); font-size: 27px; color: var(--ink); }
+.gbtn .gedit { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: var(--gc); background: var(--card); }
+.gbtn .gedit svg.ion { width: 16px; height: 16px; }
+.seg button { font-size: 12.5px; }

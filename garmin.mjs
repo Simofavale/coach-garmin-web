@@ -311,7 +311,7 @@ function parseActivity(a) {
     minutes: Math.round((num(a.duration) || 0) / 60), km: a.distance != null ? Math.round(a.distance / 100) / 10 : null,
     avgHR: int(a.averageHR), trainingEffect: num(a.aerobicTrainingEffect), trainingLoad: num(a.activityTrainingLoad),
     avgPower: int(a.avgPower), startTime: start ? Date.parse(start.replace(' ', 'T')) : null, garminName: a.activityName || null,
-    elevationGain: num(a.elevationGain), maxSpeed: num(a.maxSpeed),
+    elevationGain: num(a.elevationGain), elevationLoss: num(a.elevationLoss), maxElevation: num(a.maxElevation), maxSpeed: num(a.maxSpeed), avgSpeed: num(a.averageSpeed),
   });
 }
 
@@ -392,7 +392,17 @@ export async function sync({ days = 3 } = {}) {
       : await get('/activitylist-service/activities/search/activities', { startDate: keys[0], endDate: today(), start: '0', limit: '100' });
     const map = new Map(c.activities.map(a => [a.id, a]));
     for (const a of (Array.isArray(acts) ? acts : []).map(parseActivity).filter(Boolean)) map.set(a.id, a);
-    c.activities = [...map.values()].sort((a, b) => (b.startTime || 0) - (a.startTime || 0)).slice(0, 300);
+    // storico completo delle attività: 100 più vecchie a ogni giro, finché ce ne sono
+    // tutte le attività salvate su Garmin: pagine da 100 fino in fondo (al primo giro), poi solo le nuove
+    for (let p = 0; !c.activitiesDone && p < 60; p++) {
+      c.activitiesOffset = c.activitiesOffset || 0;
+      const older = await opt('/activitylist-service/activities/search/activities', { start: String(c.activitiesOffset), limit: '100' });
+      const arr = Array.isArray(older) ? older : [];
+      for (const a of arr.map(parseActivity).filter(Boolean)) map.set(a.id, a);
+      c.activitiesOffset += arr.length;
+      if (arr.length < 100) c.activitiesDone = true;
+    }
+    c.activities = [...map.values()].sort((a, b) => (b.startTime || 0) - (a.startTime || 0)).slice(0, 10000);
     // FTP e dispositivi: una volta ogni 6 ore
     if (!c.devicesAt || Date.now() - c.devicesAt > 6 * 3600e3) {
       const f = await opt('/biometric-service/biometric/latestFunctionalThresholdPower/CYCLING');
@@ -455,13 +465,58 @@ export async function renewMyWhoosh() {
 }
 export const myWhooshAuto = () => fs.existsSync(MW_LOGIN());
 
+/**
+ * Uscite MyWhoosh su Garmin Connect (come l'import dell'app iPhone): legge le ultime uscite con il token dell'app
+ * MyWhoosh, scarica i file FIT di quelle nuove e li carica su Garmin, saltando quelle già presenti
+ * (attività in bici con partenza entro 15 minuti) e quelle più vecchie di 30 giorni.
+ */
+export async function importMyWhoosh(c) {
+  const m = loadMyWhoosh();
+  if (!m?.token || !loadTokens()) return 0;
+  const H = { Authorization: 'Bearer ' + m.token, 'Content-Type': 'application/json', Accept: 'application/json' };
+  let list = [];
+  try {
+    const r = await fetch('https://service14.mywhoosh.com/v2/rider/profile/activities', { method: 'POST', headers: H, body: JSON.stringify({ page: 1, limit: 20, sortDate: 'DESC' }), signal: AbortSignal.timeout(30e3) });
+    if (!r.ok) { console.log(`  MyWhoosh uscite: HTTP ${r.status}`); return 0; }
+    const j = await r.json();
+    list = Array.isArray(j) ? j : Array.isArray(j?.data) ? j.data : j?.data?.results || j?.results || [];
+  } catch (e) { console.log('  MyWhoosh uscite: ' + e.message); return 0; }
+  const done = new Set(c.mwImported || []);
+  const isRide = a => /gravel|bici|cicl|rulli|bike/i.test(a.type);
+  let up = 0, skip = 0, ko = 0;
+  for (const ride of list) {
+    const fid = ride.activityFileId;
+    if (!fid || done.has(fid)) continue;
+    const start = Date.parse(ride.startDatetime || ride.startTime || ride.date || '');
+    if (!start || Date.now() - start > 30 * 864e5) { done.add(fid); continue; }
+    if (c.activities.some(a => isRide(a) && a.startTime && Math.abs(a.startTime - start) < 15 * 60e3)) { done.add(fid); skip++; continue; }
+    try {
+      const d = await fetch('https://service14.mywhoosh.com/v2/rider/profile/download-activity-file', { method: 'POST', headers: H, body: JSON.stringify({ key: m.userId, fileId: fid }), signal: AbortSignal.timeout(30e3) });
+      const url = (await d.json().catch(() => ({})))?.data;
+      if (typeof url !== 'string' || !url.startsWith('http')) throw new Error('indirizzo del file non ricevuto');
+      const fit = Buffer.from(await (await fetch(url, { signal: AbortSignal.timeout(60e3) })).arrayBuffer());
+      if (fit.subarray(8, 12).toString() !== '.FIT') throw new Error('il file non è un FIT');
+      const t = await tokens();
+      const form = new FormData();
+      form.append('file', new Blob([fit]), `MyWhoosh-${fid}.fit`);
+      const u = await fetchRetry(CONNECT + '/upload-service/upload', { method: 'POST', headers: { ...NATIVE, Authorization: 'Bearer ' + t.accessToken }, body: form });
+      if (u.status === 409 || u.ok) { done.add(fid); u.status === 409 ? skip++ : up++; }
+      else throw new Error('Garmin HTTP ' + u.status);
+    } catch (e) { ko++; console.log(`  MyWhoosh → Garmin: uscita non caricata (${e.message})`); }
+  }
+  c.mwImported = [...done].slice(-500);
+  c.mwLast = { at: Date.now(), up, skip, ko };
+  console.log(`  MyWhoosh → Garmin: ${up} caricate, ${skip} già presenti${ko ? `, ${ko} non riuscite` : ''}`);
+  return up;
+}
+
 /** Esito dell'ultimo collegamento chiesto dalla web app (stesso giro di GitHub Actions). */
 export function loadEsito() { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'esito.json'), 'utf8')); } catch { return null; } }
 
 /** Dati per la web app (senza il token Garmin né campi interni). */
 export function publicData(c) {
   return {
-    mywhoosh: loadMyWhoosh(), mywhooshAuto: myWhooshAuto(), esito: loadEsito(), garminLinked: !!loadTokens(),
+    mwImport: c.mwLast || null, mywhoosh: loadMyWhoosh(), mywhooshAuto: myWhooshAuto(), esito: loadEsito(), garminLinked: !!loadTokens(),
     updated: c.lastSync || null, error: c.lastSyncError || null, profile: c.profile || null,
     days: Object.values(c.days).sort((a, b) => (a.key < b.key ? -1 : 1)),
     activities: c.activities, devices: c.devices || [], ftp: c.ftp || null,
