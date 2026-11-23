@@ -422,7 +422,8 @@ export const loadMyWhoosh = () => readEnc(path.join(ROOT, 'data', 'mywhoosh.enc.
  * Usa l'accesso dell'app MyWhoosh (services.mywhoosh.com), che non ha il controllo reCAPTCHA del sito;
  * poi verifica che il codice valga anche per la libreria degli allenamenti (coaching.mywhoosh.com).
  */
-export async function loginMyWhoosh(email, password) {
+const MW_LOGIN = () => path.join(ROOT, 'data', 'mywhoosh-login.enc.json');
+export async function loginMyWhoosh(email, password, { save = true } = {}) {
   const r = await fetch('https://services.mywhoosh.com/http-service/api/login', {
     method: 'POST', signal: AbortSignal.timeout(30e3), headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ Username: email, Password: password, Platform: 'Android', Action: 1001, CorrelationId: crypto.randomUUID(), DeviceId: crypto.randomUUID(), Authorization: '' }),
@@ -440,8 +441,19 @@ export async function loginMyWhoosh(email, password) {
   console.log(`  MyWhoosh: accesso app riuscito, libreria allenamenti HTTP ${t.status}`);
   if (!t.ok) throw new Error(`Accesso a MyWhoosh riuscito, ma la libreria degli allenamenti non accetta questo codice (HTTP ${t.status}): serve un'altra strada, avvisa Claude.`);
   writeEnc(path.join(ROOT, 'data', 'mywhoosh.enc.json'), { token, refreshToken: j.RefreshToken || null, userId: userId != null ? String(userId) : null, exp });
+  // scelta di Simone: email e password conservate cifrate (TOKEN_KEY, solo su GitHub e sul Mac) per rinnovare l'accesso da solo
+  if (save) writeEnc(MW_LOGIN(), { email, password });
   return { exp, n };
 }
+
+/** Rinnova da solo l'accesso MyWhoosh quando mancano meno di 3 giorni alla scadenza. */
+export async function renewMyWhoosh() {
+  const cur = loadMyWhoosh(), cred = readEnc(MW_LOGIN());
+  if (!cred?.email || (cur?.exp && cur.exp - Date.now() > 3 * 864e5)) return;
+  try { const r = await loginMyWhoosh(cred.email, cred.password, { save: false }); console.log(`  MyWhoosh: accesso rinnovato fino al ${r.exp ? new Date(r.exp).toLocaleDateString('it-IT') : '?'}`); }
+  catch (e) { console.error('  MyWhoosh: rinnovo non riuscito: ' + e.message); }
+}
+export const myWhooshAuto = () => fs.existsSync(MW_LOGIN());
 
 /** Esito dell'ultimo collegamento chiesto dalla web app (stesso giro di GitHub Actions). */
 export function loadEsito() { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'esito.json'), 'utf8')); } catch { return null; } }
@@ -449,7 +461,7 @@ export function loadEsito() { try { return JSON.parse(fs.readFileSync(path.join(
 /** Dati per la web app (senza il token Garmin né campi interni). */
 export function publicData(c) {
   return {
-    mywhoosh: loadMyWhoosh(), esito: loadEsito(), garminLinked: !!loadTokens(),
+    mywhoosh: loadMyWhoosh(), mywhooshAuto: myWhooshAuto(), esito: loadEsito(), garminLinked: !!loadTokens(),
     updated: c.lastSync || null, error: c.lastSyncError || null, profile: c.profile || null,
     days: Object.values(c.days).sort((a, b) => (a.key < b.key ? -1 : 1)),
     activities: c.activities, devices: c.devices || [], ftp: c.ftp || null,
