@@ -22,7 +22,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # gira sul Mac di Simone (runner "mac-simone"): Garmin blocca le richieste dai server di GitHub (HTTP 429)
+    runs-on: [self-hosted, coach-mac]
     timeout-minutes: 15
     # un solo giro alla volta: i giri usano e rinnovano lo stesso token Garmin
     concurrency:
@@ -36,9 +37,8 @@ jobs:
         with:
           ref: main
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - name: Controlla Node sul Mac
+        run: node --version
 
       # storico Garmin (cifrato) tra un giro e l'altro: si scaricano solo i giorni nuovi
       - name: Ripristina storico
@@ -82,12 +82,28 @@ jobs:
             git push origin HEAD:main
           fi
 
+      # il sito pronto passa ai server di GitHub, che lo impacchettano per Pages (sul Mac manca gtar)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sito
+          path: _site
+          include-hidden-files: true
+          retention-days: 1
+
+  pagine:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sito
+          path: _site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
   deploy:
-    needs: build
+    needs: pagine
     runs-on: ubuntu-latest
     concurrency:
       group: coach-deploy
@@ -102,7 +118,7 @@ jobs:
   # Catena: aspetta ~13 minuti e fa partire il prossimo aggiornamento (anche se questo giro è fallito).
   # Se nel frattempo è partito un giro più recente, lascia proseguire quello.
   prossimo:
-    needs: [build, deploy]
+    needs: [build, pagine, deploy]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 20

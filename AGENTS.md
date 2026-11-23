@@ -17,3 +17,5 @@ Versione web (PWA) dell'app iPhone Coach Garmin (`../Coach Garmin`). Impostazion
 - Da fare: invio corse al Forerunner, sonnellini e sveglie CIRQA, import uscite MyWhoosh su Garmin, rinomina attività (scritture su Garmin: via GitHub Actions o server sul Mac).
 
 > Regole generali in `~/.studio-locale/AGENTS.md`, preferenze in `~/.studio-locale/progetti/MEMORIA.md`.
+
+- **Il lavoro con Garmin gira sul Mac** (23-11-2026): Garmin rispondeva HTTP 429 ai server di GitHub. Runner self-hosted "mac-simone" (etichetta `coach-mac`) in `~/Library/Application Support/CoachGarminRunner`, servizio launchd `actions.runner.Simofavale-coach-garmin-web.mac-simone` (parte all'accensione). Job `build` sul Mac, `pagine`/`deploy`/`prossimo` su ubuntu. Repo con approvazione obbligatoria per i contributi esterni. Il Mac deve essere acceso e sveglio.
