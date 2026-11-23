@@ -7,7 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { ROOT, sync, publicData, loadCache, encrypt, localKeys, addDays, today, loadEsito, renewMyWhoosh, importMyWhoosh, saveCache, myWhooshFtp } from './garmin.mjs';
+import { ROOT, sync, publicData, loadCache, encrypt, localKeys, addDays, today, loadEsito, renewMyWhoosh, importMyWhoosh, saveCache, myWhooshFtp, activityDetails } from './garmin.mjs';
 
 const PORT = Number(process.env.PORT) || 5174;
 const PUB = path.join(ROOT, 'public');
@@ -73,6 +73,8 @@ if (arg('--build')) {
     fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/((?:src|href)="|from '|import\(')(\.\/)?([\w-]+\.(?:js|css))(?=['"])/g, (m, a, dot, name) => `${a}${dot || ''}${name}?v=${v}`));
   }
   fs.mkdirSync(path.join(out, 'api'), { recursive: true });
+  // dettagli delle attività (file già cifrati) in api/act/
+  if (c.lastSync) { const dir = await activityDetails(c, dataKey); saveCache(c); fs.cpSync(dir, path.join(out, 'api', 'act'), { recursive: true }); }
   fs.writeFileSync(path.join(out, 'api/garmin.json'), encrypt(JSON.stringify(publicData(c)), dataKey));
   fs.writeFileSync(path.join(out, 'api/version.json'), JSON.stringify({ updated: c.lastSync || 0, esito: loadEsito()?.id || null }));
   fs.writeFileSync(path.join(out, '.nojekyll'), '');
@@ -86,6 +88,14 @@ if (arg('--build')) {
         if (!state.json) await refresh();
         res.writeHead(200, { 'Content-Type': MIME['.json'], 'Content-Encoding': 'gzip', 'Cache-Control': 'no-store' });
         return res.end(zlib.gzipSync(state.json));
+      }
+      // dati di prova: dettaglio finto di un'attività
+      if (arg('--demo') && u.pathname.startsWith('/api/act/')) {
+        const pts = n => Array.from({ length: 120 }, (_, i) => [i * 0.5, n(i)]);
+        return res.writeHead(200, { 'Content-Type': MIME['.json'] }).end(JSON.stringify({ summary: { duration: 3600, movingDuration: 3500, distance: 28500, averageSpeed: 7.9, maxSpeed: 14.2, elevationGain: 320, averageHR: 132, maxHR: 168, calories: 640, averagePower: 168, normalizedPower: 181, trainingStressScore: 62, intensityFactor: 0.78, trainingEffect: 3.1, activityTrainingLoad: 88, moderateIntensityMinutes: 20, vigorousIntensityMinutes: 25 },
+          hrZones: [1, 2, 3, 4, 5].map(z => ({ zoneNumber: z, secsInZone: [300, 1500, 1200, 500, 100][z - 1] })), powerZones: [], laps: [{ duration: 1800, distance: 14000, averageSpeed: 7.8, averageHR: 128, averagePower: 160 }, { duration: 1800, distance: 14500, averageSpeed: 8.0, averageHR: 136, averagePower: 176 }],
+          weather: { temp: 59, humidity: 70, wind: 6, desc: 'Poco nuvoloso' }, series: { directHeartRate: pts(i => 120 + 20 * Math.sin(i / 10)), directSpeed: pts(i => 28 + 4 * Math.cos(i / 7)), directElevation: pts(i => 250 + 60 * Math.sin(i / 25)) },
+          route: Array.from({ length: 60 }, (_, i) => [44.7 + 0.02 * Math.sin(i / 10), 7.85 + i * 0.002]) }));
       }
       if (u.pathname === '/api/version.json') {
         return res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' }).end(JSON.stringify({ updated: state.json ? JSON.parse(state.json).updated : 0 }));

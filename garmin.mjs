@@ -517,6 +517,53 @@ export async function importMyWhoosh(c) {
   return up;
 }
 
+/**
+ * Dettaglio delle attività (come ActivityDetail.swift): riepilogo, zone FC e potenza, giri, meteo, grafici e percorso.
+ * Garmin non si raggiunge dalla pagina web, quindi qui si prepara un file cifrato (DATA_KEY) per attività,
+ * in data/acts/ (conservato fra un giro e l'altro); al massimo `limit` attività nuove per giro, dalle più recenti.
+ */
+export async function activityDetails(c, dataKey, limit = 25) {
+  const dir = path.join(ROOT, 'data', 'acts');
+  fs.mkdirSync(dir, { recursive: true });
+  const have = new Set(fs.readdirSync(dir).map(f => f.replace('.json', '')));
+  const todo = c.activities.filter(a => !have.has(a.id) || (a.startTime && Date.now() - a.startTime < 2 * 864e5 && !c.actFinal?.[a.id])).slice(0, limit);
+  const pick = (o, keys) => Object.fromEntries(keys.filter(k => o?.[k] != null).map(k => [k, o[k]]));
+  const thin = (arr, n) => (arr.length <= n ? arr : arr.filter((_, i) => i % Math.ceil(arr.length / n) === 0));
+  let done = 0;
+  for (const a of todo) {
+    const p = `/activity-service/activity/${a.id}`;
+    try {
+      const raw = await get(p);
+      const sm = raw?.summaryDTO || raw || {};
+      const summary = Object.fromEntries(Object.entries(sm).filter(([, v]) => typeof v === 'number' || (typeof v === 'string' && v.length < 40)));
+      const hr = (await opt(`${p}/hrTimeInZones`)) || [];
+      const pw = ((await opt(`${p}/powerTimeInZones`)) || []).filter(z => z.secsInZone > 0);
+      const laps = ((await opt(`${p}/splits`))?.lapDTOs || []).map(l => pick(l, ['duration', 'distance', 'averageSpeed', 'averageHR', 'averagePower', 'elevationGain']));
+      const w = await opt(`${p}/weather`);
+      const d = await opt(`${p}/details`, { maxChartSize: '600', maxPolylineSize: '1500' });
+      const series = {}; let route = [];
+      if (d) {
+        const idx = {}; for (const m of d.metricDescriptors || []) idx[m.key] = m.metricsIndex;
+        const rows = (d.activityDetailMetrics || []).map(r => r.metrics || []);
+        const t = idx.sumDuration ?? idx.sumElapsedDuration;
+        if (t != null) for (const k of ['directHeartRate', 'directPower', 'directSpeed', 'directElevation', 'directBikeCadence', 'directRunCadence']) {
+          if (idx[k] == null) continue;
+          const pts = rows.filter(r => r[t] != null && r[idx[k]] != null).map(r => [Math.round(r[t] / 6) / 10, Math.round((k === 'directSpeed' ? r[idx[k]] * 3.6 : r[idx[k]]) * 10) / 10]);
+          if (pts.length > 2) series[k] = thin(pts, 300);
+        }
+        route = thin((d.geoPolylineDTO?.polyline || []).filter(q => q.lat != null && q.lon != null).map(q => [Math.round(q.lat * 1e5) / 1e5, Math.round(q.lon * 1e5) / 1e5]), 800);
+      }
+      const out = { id: a.id, summary, hrZones: hr.map(z => pick(z, ['zoneNumber', 'secsInZone', 'zoneLowBoundary'])), powerZones: pw.map(z => pick(z, ['zoneNumber', 'secsInZone', 'zoneLowBoundary'])), laps,
+        weather: w ? { temp: w.temp, humidity: w.relativeHumidity, wind: w.windSpeed, desc: w.weatherTypeDTO?.desc } : null, series, route };
+      fs.writeFileSync(path.join(dir, `${a.id}.json`), encrypt(JSON.stringify(out), dataKey));
+      if (a.startTime && Date.now() - a.startTime >= 2 * 864e5) (c.actFinal = c.actFinal || {})[a.id] = 1;
+      done++;
+    } catch (e) { if (/429|collegato|scaduta/.test(e.message)) break; }
+  }
+  if (done) console.log(`  Dettagli attività: ${done} preparati (${have.size + done} in archivio)`);
+  return dir;
+}
+
 /** FTP del profilo MyWhoosh (una volta ogni 6 ore). */
 export async function myWhooshFtp(c) {
   const m = loadMyWhoosh();
