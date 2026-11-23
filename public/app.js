@@ -340,12 +340,6 @@ function viewToday() {
     out.push(card(w.sport === 'run' ? w.name : C.title(w), w.sport === 'run' ? 'walk' : 'bicycle', body));
     if (w.sport !== 'run') out.push(myWhooshCard(w, steps, adj));
   }
-  const cq = DATA.cirqa;
-  if (cq) {
-    const on = (cq.alarms || []).filter(a => a.alarmMode === 'ON').map(a => `${alarmTime(a.alarmTime)} ${alarmDays(a.alarmDays)}`);
-    out.push(`<div class="list"><div class="li link" data-act="alarms"><div class="ico-c" style="background:#ff9500">${ic('alarm')}</div><div class="grow"><div class="ttl">Sveglie ${esc(cq.name)}</div><div class="sub">${esc(on.length ? on.join(' · ') : 'Nessuna sveglia attiva')}</div></div>${ic('chevron-forward', 'chev')}</div>
-      <div class="li link" data-act="wear"><div class="ico-c" style="background:#5856d6">${ic('fitness')}</div><div class="grow"><div class="ttl">Posizione della ${esc(cq.name)}</div><div class="sub">${esc(WEAR[cq.mountingSide] || 'non letta')}</div></div>${ic('chevron-forward', 'chev')}</div></div>`);
-  }
   out.push(`<button class="btn ${ci ? '' : 'orange'}" data-act="checkin">${ic('heart')}${ci ? `Sensazioni ${ci.feeling}/10 · modifica` : 'Check-in sensazioni'}</button>`);
   if (adj && w && w.code !== 'PIANO') dec.practical[0] = `Su MyWhoosh segui i blocchi qui sopra: è ${w.code} su misura per oggi, più leggero del file salvato "${w.code} ${w.name}".`;
   const ins = X.insights(t, days, DATA.activities);
@@ -1164,6 +1158,7 @@ document.addEventListener('click', async e => {
 });
 
 // ---------- avvio ----------
+try { screen.orientation?.lock?.('portrait').catch(() => { }); } catch { }
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
 if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/oggi');
 loadData();
