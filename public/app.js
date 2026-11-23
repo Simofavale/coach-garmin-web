@@ -171,7 +171,7 @@ const GARMIN_SIGNIN = 'https://sso.garmin.com/mobile/sso/en_US/sign-in?clientId=
 function openLinkGarmin() {
   sheet('Collega Garmin', `<section class="card"><div class="sub" style="display:flex;flex-direction:column;gap:8px">
     <p style="margin:0"><b>1.</b> Tocca il pulsante e accedi con email e password Garmin. La password la vede solo Garmin.</p></div>
-    <a class="btn" href="${GARMIN_SIGNIN}" target="_blank" rel="noopener">Apri la pagina di accesso Garmin</a>
+    <button class="btn" data-act="garminsignin">Apri la pagina di accesso Garmin</button>
     <div class="sub" style="display:flex;flex-direction:column;gap:8px">
     <p style="margin:0"><b>2.</b> Dopo l'accesso si apre una pagina "mobile.integration.garmin.com" (può essere bianca o dare errore: va bene). Copia il suo <b>indirizzo completo</b> dalla barra in alto (contiene "ticket=ST-…").</p>
     <p style="margin:0"><b>3.</b> Torna qui, incollalo e tocca Collega. Fallo subito: il codice vale pochi minuti.</p></div>
@@ -776,6 +776,12 @@ document.addEventListener('click', async e => {
   if (a === 'reload') return location.reload();
   if (a === 'refresh') return refreshNow();
   if (a === 'linkgarmin') return openLinkGarmin();
+  if (a === 'garminsignin') {
+    // finestra nuova se il browser la permette, altrimenti nella stessa (poi si torna indietro: il link resta salvato)
+    const w = window.open(GARMIN_SIGNIN, '_blank');
+    if (!w) { store.set('coachgarmin:apri-collega', Date.now()); location.href = GARMIN_SIGNIN; }
+    return;
+  }
   if (a === 'linkmw') return openLinkMyWhoosh();
   if (a === 'ghon') return openGhSetup(() => { route(); refreshNow(); });
   if (a === 'ghoff') { store.set(GH_KEY, ''); route(); return toast('GitHub scollegato da questo dispositivo'); }
@@ -819,4 +825,7 @@ document.addEventListener('click', async e => {
 // ---------- avvio ----------
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
 if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/oggi');
-loadData();
+loadData().then(() => {
+  const t = store.get('coachgarmin:apri-collega', 0);
+  if (t && Date.now() - t < 15 * 60e3) { store.set('coachgarmin:apri-collega', 0); location.hash = '#/account'; openLinkGarmin(); toast('Incolla qui l\'indirizzo della pagina Garmin', 5000); }
+});
