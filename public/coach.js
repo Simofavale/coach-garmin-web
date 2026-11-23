@@ -348,7 +348,7 @@ export const sessionDetail = s => (s.sport === 'run' ? `a tempo · ${s.phase}` :
 export function session(g, k) {
   const week = weekOf(g, k);
   const x = (g.extras || {})[k];
-  if (x) return { key: k, intensity: x.intensity, minutes: x.minutes, peak: x.peak, title: bikeTitle(x.intensity, x.minutes), purpose: x.why, week, phase: EXTRA_PHASE, sport: 'bike', recorded: x.recorded };
+  if (x) return { key: k, intensity: x.intensity, minutes: x.minutes, peak: x.peak, title: x.recorded ? `Uscita di tua iniziativa ${x.minutes}'` : bikeTitle(x.intensity, x.minutes), purpose: x.why, week, phase: EXTRA_PHASE, sport: 'bike', recorded: x.recorded };
   if ((g.skipped || []).includes(k)) return null;
   if (week < 0 || k > addDays(g.targetDate, 1)) return null;
   const from = Object.keys(g.moved || {}).find(f => g.moved[f] === k);
@@ -446,6 +446,31 @@ export function removeExtra(g, k) {
   delete g.extras[k];
   g.softened = (g.softened || []).filter(s => !(x.softened || []).includes(s));
   return 'Tolto l\'allenamento in più di oggi: il resto della settimana torna come prima.';
+}
+
+/**
+ * Uscite fatte di tua iniziativa nei giorni di riposo (ultimi 3 giorni): le registra come allenamento in più
+ * e, se sono state impegnative, alleggerisce la prossima seduta dura (come registerUnplanned dell'app).
+ */
+export function registerUnplanned(g, activities, k = today()) {
+  const notes = [];
+  for (let back = 1; back <= 3; back++) {
+    const d = addDays(k, -back);
+    if (d < g.startDate || (g.extras || {})[d] || session(g, d)) continue;
+    const did = activities.filter(a => a.key === d && (isRide(a) || a.minutes >= 45));
+    if (!did.length) continue;
+    const minutes = did.reduce((s, a) => s + a.minutes, 0), load = did.reduce((s, a) => s + loadOf(a), 0);
+    const tes = did.map(a => a.trainingEffect).filter(x => x != null), te = tes.length ? Math.max(...tes) : 2.5;
+    const i = te >= 3.8 ? I.threshold : te >= 3 ? I.tempo : te >= 2 ? I.endurance : I.recovery;
+    const soft = [];
+    if (load >= 100 || i >= I.tempo) { const hard = upcoming(g, addDays(k, -1)).find(s => s.intensity >= I.tempo); if (hard) soft.push(hard.key); }
+    g.softened = [...(g.softened || []), ...soft];
+    g.extras = { ...(g.extras || {}), [d]: { intensity: i, minutes, peak: 0, why: 'Fatto di tua iniziativa: registrato come allenamento in più.', softened: soft, recorded: true } };
+    let n = `Registrato come allenamento in più: ${did.map(a => a.type).join(', ')} di ${pretty(d, 'day').toLowerCase()} (${minutes}').`;
+    if (soft[0]) n += ` Alleggerisco la seduta di ${pretty(soft[0], 'day').toLowerCase()}.`;
+    notes.push(n);
+  }
+  return notes.length ? notes.join(' ') : null;
 }
 
 /** Progressione automatica: guarda ieri e alza o abbassa la difficoltà (una volta al giorno). */

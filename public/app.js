@@ -92,8 +92,9 @@ async function loadData({ quiet = false } = {}) {
     const changed = !DATA || d.updated !== DATA.updated;
     DATA = d;
     if (U.goal) {
+      const extra = C.registerUnplanned(U.goal, DATA.activities);
       const msg = C.updateProgression(U.goal, DATA.days, DATA.activities, U.checkIns);
-      if (msg) { saveU(); toast(msg, 5000); }
+      if (extra || msg) { saveU(); toast([extra, msg].filter(Boolean).join(' '), 7000); }
     }
     // non ridisegna mentre stai scrivendo in un campo (altrimenti quello che incolli sparisce)
     const typing = document.activeElement?.matches?.('#view input, #view textarea');
