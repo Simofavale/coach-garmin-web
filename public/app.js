@@ -5,6 +5,7 @@ import * as D from './dieta.js';
 import { ic } from './icons.js';
 import * as AI from './ai.js';
 import * as MW from './mywhoosh.js';
+import * as X from './extra.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -64,7 +65,11 @@ const geminiKey = () => store.get(GKEY, '');
 let MWLIST = null, MWSTATE = '';   // allenamenti salvati su MyWhoosh (letti all'apertura)
 const saveU = () => store.set(UKEY, U);
 let DATA = null, DIET = D.load(), weekOffset = 0, dietCat = 'carbo', loading = false;
-const ftp = () => U.ftpManual || DATA?.ftp || 0;
+/** FTP in uso: a mano, MyWhoosh, Garmin, oppure automatica (MyWhoosh se c'è, misurata sui rulli). */
+const ftpSource = () => U.ftpSource || (U.ftpManual ? 'manual' : 'auto');
+const ftp = () => { const src = ftpSource(), mw = DATA?.mwFtp || 0, g = DATA?.ftp || 0; return src === 'manual' ? (U.ftpManual || mw || g) : src === 'mywhoosh' ? (mw || g) : src === 'garmin' ? (g || mw) : (mw || g); };
+const ftpConflict = () => ftpSource() === 'auto' && DATA?.mwFtp && DATA?.ftp && DATA.mwFtp !== DATA.ftp;
+const title4 = a => U.names?.[a.id] || a.garminName || a.type;
 
 function toast(t, ms = 3200) {
   const el = $('#toast'); el.textContent = t; el.hidden = false;
@@ -165,6 +170,7 @@ async function sendLink(obj, label) {
     await loadData();
     const e = DATA.esito;
     if (e?.ok) { toast(e.msg, 6000); if (obj.tipo === 'mywhoosh') { MWLIST = null; loadMyWhoosh(); } }
+    else if (obj.tipo === 'azione') sheet('Modifica non riuscita', `<div class="banner">${esc(e?.msg || 'Errore sconosciuto.')}</div>`);
     else sheet('Collegamento non riuscito', `<div class="banner">${esc(e?.msg || 'Errore sconosciuto.')}</div><button class="btn" data-act="${obj.tipo === 'garmin' ? 'linkgarmin' : 'linkmw'}">Riprova</button>`);
   }, () => sendLink(obj, label));
 }
@@ -288,6 +294,7 @@ function viewToday() {
   const h = C.health(t, days), ci = U.checkIns[k];
   const adj = C.adjustToday(dec, t, ci);
   const out = [];
+  if (ftpConflict()) out.push(`<div class="banner link" data-act="ftpsrc">${ic('flash')} FTP diversa tra MyWhoosh (${DATA.mwFtp} W) e Garmin (${DATA.ftp} W): uso MyWhoosh. Tocca per scegliere.</div>`);
   out.push(DATA.error ? `<div class="syncbar warn">${ic('warning')}${esc(DATA.error)}</div>`
     : `<div class="syncbar">${ic('checkmark-circle')}Garmin aggiornato ${DATA.updated ? ago(DATA.updated) : '–'}${DATA.demo ? ' · <b>dati di prova</b>' : ''}</div>`);
   // essenziali Garmin
@@ -337,8 +344,19 @@ function viewToday() {
     out.push(card(w.sport === 'run' ? w.name : C.title(w), w.sport === 'run' ? 'walk' : 'bicycle', body));
     if (w.sport !== 'run') out.push(myWhooshCard(w, steps, adj));
   }
+  const cq = DATA.cirqa;
+  if (cq) {
+    const on = (cq.alarms || []).filter(a => a.alarmMode === 'ON').map(a => `${alarmTime(a.alarmTime)} ${alarmDays(a.alarmDays)}`);
+    out.push(`<div class="list"><div class="li link" data-act="alarms"><div class="ico-c" style="background:#ff9500">${ic('alarm')}</div><div class="grow"><div class="ttl">Sveglie ${esc(cq.name)}</div><div class="sub">${esc(on.length ? on.join(' · ') : 'Nessuna sveglia attiva')}</div></div>${ic('chevron-forward', 'chev')}</div>
+      <div class="li link" data-act="wear"><div class="ico-c" style="background:#5856d6">${ic('fitness')}</div><div class="grow"><div class="ttl">Posizione della ${esc(cq.name)}</div><div class="sub">${esc(WEAR[cq.mountingSide] || 'non letta')}</div></div>${ic('chevron-forward', 'chev')}</div></div>`);
+  }
   out.push(`<button class="btn ${ci ? '' : 'orange'}" data-act="checkin">${ic('heart')}${ci ? `Sensazioni ${ci.feeling}/10 · modifica` : 'Check-in sensazioni'}</button>`);
   if (adj && w && w.code !== 'PIANO') dec.practical[0] = `Su MyWhoosh segui i blocchi qui sopra: è ${w.code} su misura per oggi, più leggero del file salvato "${w.code} ${w.name}".`;
+  const ins = X.insights(t, days, DATA.activities);
+  if (ins.length) out.push(`<section class="card"><div class="card-title">${ic('sparkles')}Cosa dicono i tuoi dati</div><div class="sub">${esc(X.insightSummary(ins))}</div>
+    ${ins.map((x, i) => `<details class="ins"><summary><span style="color:${x.color}">${ic(x.icon)}</span><span class="grow strong">${esc(x.title)}</span><span class="mono" style="color:${x.tone === 'good' ? '#2ecc71' : x.tone === 'watch' ? 'var(--orange)' : 'var(--ink-2)'}">${esc(x.value)}</span></summary>
+      <div class="sub" style="display:flex;flex-direction:column;gap:6px;padding:4px 0 6px 30px"><b style="color:var(--ink)">${esc(x.headline)}</b><span>${esc(x.detail)}</span>${x.tip ? `<span style="color:var(--accent-ink)"><b>Oggi:</b> ${esc(x.tip)}</span>` : ''}</div></details>`).join('')}
+    <div class="tiny">Interpretazioni generali di fisiologia dello sport, non diagnosi.</div></section>`);
   out.push(card('Oggi nel pratico', 'checkmark-circle', dec.practical.map((p, i) => `<div class="bullet"><span class="chip" style="min-width:22px;text-align:center;align-self:flex-start">${i + 1}</span><span>${esc(p)}</span></div>`).join('')));
   if (dec.dataWarnings.length) out.push(card('Controllo dati', 'warning', dec.dataWarnings.map(x => bullet(x, 'information-circle', 'var(--orange)')).join('')));
   $('#view').innerHTML = out.join('');
@@ -355,7 +373,7 @@ const feedback = s => String(s).replace(/_/g, ' ').toLowerCase().replace(/^\w/, 
 
 function sheet(title, body, { right = '', left = 'Chiudi', onOpen } = {}) {
   const m = $('#modal');
-  m.onclick = null;
+  m.onclick = null; m.onchange = null;
   m.innerHTML = `<div class="sheet" role="dialog" aria-label="${esc(title)}"><div class="sheet-head"><button class="l" data-act="close">${esc(left)}</button><h3>${esc(title)}</h3>${right ? `<button class="r" data-act="sheet-ok">${esc(right)}</button>` : '<span></span>'}</div>${body}</div>`;
   m.hidden = false; document.body.style.overflow = 'hidden';
   onOpen && onOpen(m);
@@ -383,11 +401,120 @@ function openCheckIn() {
   };
 }
 function openNaps() {
+  const k = C.today();
   const list = DATA.days.slice(-7).reverse().map(d => {
     const naps = d.naps || [];
-    return `<div class="li"><div class="grow"><div class="ttl">${C.pretty(d.key)}</div><div class="sub mono">${naps.length ? naps.map(n => `${hhmm(n.start)}–${hhmm(n.end)} · ${durata(Math.round((n.end - n.start) / 60e3))}`).join('<br>') : d.napMin ? `${d.napMin} min in tutto` : 'nessuno'}</div></div></div>`;
+    const rows = naps.map(n => `<div class="row"><span class="grow mono">${hhmm(n.start)}–${hhmm(n.end)} · ${durata(Math.round((n.end - n.start) / 60e3))}</span>${d.key === k ? `<button class="chip" data-act="napedit" data-day="${d.key}" data-start="${n.start}" data-end="${n.end}">Modifica</button>` : ''}<button class="chip" style="color:var(--red)" data-act="napdel" data-day="${d.key}" data-start="${n.start}">Elimina</button></div>`).join('');
+    return `<div class="li" style="flex-direction:column;align-items:stretch;gap:4px"><div class="ttl">${C.pretty(d.key)}</div>${rows || `<div class="sub">${d.napMin ? `${d.napMin} min in tutto` : 'nessuno'}</div>`}</div>`;
   }).join('');
-  sheet('Sonnellini', `<div class="list">${list}</div><p class="tiny" style="margin:0 4px">Per aggiungere, modificare o eliminare un sonnellino usa l'app Coach Garmin sull'iPhone o Garmin Connect: la web app per ora li legge soltanto.</p>`);
+  sheet('Sonnellini', `<button class="btn" data-act="napnew">${ic('add')}Aggiungi un sonnellino di oggi</button><div class="list">${list}</div>
+    <p class="tiny" style="margin:0 4px">Garmin accetta nuovi sonnellini solo per oggi e già finiti. Le modifiche passano da GitHub e arrivano in 1–2 minuti.</p>`);
+}
+function openNapForm(day, start, end) {
+  const now = new Date(), t = ms => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const s0 = start ? t(start) : t(now - 40 * 60e3), e0 = end ? t(end) : t(now - 10 * 60e3);
+  sheet(start ? 'Modifica sonnellino' : 'Nuovo sonnellino', `<div class="form"><div class="field"><span>Inizio</span><input type="time" id="napS" value="${s0}"></div><div class="field"><span>Fine</span><input type="time" id="napE" value="${e0}"></div></div>
+    <p id="napMsg" class="tiny" style="margin:0 4px">Solo sonnellini di oggi, già finiti.</p>`, { right: 'Salva', left: 'Annulla' });
+  sheet.ok = () => {
+    const k = C.today(), [sh, sm] = $('#napS').value.split(':').map(Number), [eh, em] = $('#napE').value.split(':').map(Number);
+    const base = C.toDate(k); base.setHours(0, 0, 0, 0);
+    const ns = +base + (sh * 60 + sm) * 60e3, ne = +base + (eh * 60 + em) * 60e3;
+    if (!(ne > ns) || ne > Date.now()) { $('#napMsg').textContent = 'La fine deve essere dopo l\'inizio e non nel futuro.'; return; }
+    if (start) sendAction({ azione: 'sonnellino-del', day, start, then: { azione: 'sonnellino-add', day: k, start: ns, end: ne } }, 'Modifico il sonnellino');
+    else sendAction({ azione: 'sonnellino-add', day: k, start: ns, end: ne }, 'Salvo il sonnellino');
+  };
+}
+/** Modifica su Garmin passando da GitHub (come i collegamenti). */
+function sendAction(obj, label) { sendLink({ tipo: 'azione', ...obj }, label); }
+
+// ---------- sveglie e posizione della CIRQA ----------
+const WEAR = { LEFT_WRIST: 'Polso sinistro', RIGHT_WRIST: 'Polso destro', LEFT_UPPER_ARM: 'Braccio sinistro (in alto)', RIGHT_UPPER_ARM: 'Braccio destro (in alto)' };
+const DAYS = [['M', 'Lu'], ['Tu', 'Ma'], ['W', 'Me'], ['Th', 'Gi'], ['F', 'Ve'], ['Sa', 'Sa'], ['Su', 'Do']];
+const alarmTime = m => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
+function alarmDays(d) {
+  const ds = (d || []).filter(x => x !== 'ONCE');
+  if (!ds.length) return 'una volta';
+  if (ds.length === 7) return 'tutti i giorni';
+  if (ds.length === 5 && ['M', 'Tu', 'W', 'Th', 'F'].every(x => ds.includes(x))) return 'lun–ven';
+  return DAYS.filter(([k]) => ds.includes(k)).map(([, l]) => l).join(' ');
+}
+let ALARMS = null;
+function openAlarms() {
+  const cq = DATA.cirqa; if (!cq) return;
+  ALARMS = ALARMS || (cq.alarms || []).map(a => ({ ...a, _orig: JSON.stringify(a) }));
+  const draw = () => {
+    $('#alBody').innerHTML = (ALARMS.filter(a => !a._del).map((a, i) => `<div class="li"><div class="grow link" data-act="alarmedit" data-i="${ALARMS.indexOf(a)}"><div class="ttl mono" style="font-size:22px">${alarmTime(a.alarmTime)}</div><div class="sub">${alarmDays(a.alarmDays)} · ${a.alarmSound === 'VIBRATION' ? 'vibrazione' : a.alarmSound === 'TONE' ? 'suono' : 'suono e vibrazione'}</div></div>
+      <label class="switch"><input type="checkbox" data-alon="${ALARMS.indexOf(a)}" ${a.alarmMode === 'ON' ? 'checked' : ''}><i></i></label></div>`).join('') || '<div class="li sub">Nessuna sveglia</div>');
+  };
+  sheet(`Sveglie ${cq.name}`, `<div class="list" id="alBody"></div><button class="btn soft" data-act="alarmnew">${ic('add')}Nuova sveglia</button>
+    <p class="tiny" style="margin:0 4px">Le sveglie arrivano alla band alla prossima sincronizzazione con Garmin Connect. La sveglia smart per la CIRQA Garmin non la espone.</p>`, { right: 'Invia', left: 'Annulla', onOpen: draw });
+  $('#modal').onchange = e => { const i = e.target.dataset?.alon; if (i != null) ALARMS[+i].alarmMode = e.target.checked ? 'ON' : 'OFF'; };
+  sheet.ok = () => {
+    const list = ALARMS.map(a => {
+      const { _orig, _del, _new, ...d } = a;
+      if (_new) delete d.alarmId;
+      if (!d.alarmDays?.length) d.alarmDays = ['ONCE'];
+      return { ...d, changeState: _del ? 'DELETED' : _new ? 'NEW' : JSON.stringify(Object.fromEntries(Object.entries(a).filter(([k]) => !k.startsWith('_')))) === _orig ? 'UNCHANGED' : 'CHANGED' };
+    }).filter(a => !(a.changeState === 'DELETED' && !a.alarmId));
+    ALARMS = null;
+    sendAction({ azione: 'sveglie', alarms: list }, 'Invio le sveglie');
+  };
+  openAlarms.redraw = draw;
+}
+function openAlarmEdit(i) {
+  const a = i == null ? { alarmTime: 420, alarmDays: ['M', 'Tu', 'W', 'Th', 'F'], alarmMode: 'ON', alarmSound: 'VIBRATION', ...(ALARMS[0] ? { backlight: ALARMS[0].backlight } : {}), _new: true } : ALARMS[i];
+  const days = new Set((a.alarmDays || []).filter(x => x !== 'ONCE'));
+  const back = () => openAlarms();
+  sheet(i == null ? 'Nuova sveglia' : 'Modifica sveglia', `<div class="form"><div class="field"><span>Ora</span><input type="time" id="alT" value="${alarmTime(a.alarmTime)}"></div>
+    <div class="daypick">${DAYS.map(([k, l]) => `<button class="${days.has(k) ? 'on' : ''}" data-alday="${k}">${l}</button>`).join('')}</div>
+    <div class="field"><span>Avviso</span><select id="alS"><option value="VIBRATION">Vibrazione</option><option value="TONE">Suono</option><option value="TONE_AND_VIBRATION">Suono e vibrazione</option></select></div></div>
+    <div class="tiny" style="margin:0 4px">Nessun giorno = una volta sola.</div>${i != null ? '<button class="btn danger" data-act="alarmdel">Elimina la sveglia</button>' : ''}`,
+  { right: 'Fatto', left: 'Indietro', onOpen: m => { m.querySelector('#alS').value = a.alarmSound || 'VIBRATION'; } });
+  $('#modal').onclick = e => { const b = e.target.closest('[data-alday]'); if (b) { const k = b.dataset.alday; days.has(k) ? days.delete(k) : days.add(k); b.classList.toggle('on'); } if (e.target.closest('[data-act=alarmdel]')) { a._del = true; back(); } };
+  sheet.ok = () => {
+    const [h, m] = $('#alT').value.split(':').map(Number);
+    Object.assign(a, { alarmTime: h * 60 + m, alarmDays: days.size ? DAYS.map(([k]) => k).filter(k => days.has(k)) : ['ONCE'], alarmSound: $('#alS').value });
+    if (i == null) ALARMS.push(a);
+    back();
+  };
+}
+function openWear() {
+  const cq = DATA.cirqa; if (!cq) return;
+  sheet(`Posizione della ${cq.name}`, `<div class="list">${Object.entries(WEAR).map(([k, l]) => `<button class="li" style="width:100%;text-align:left" data-act="wearset" data-v="${k}"><span class="grow">${l}</span>${cq.mountingSide === k ? `<span style="color:var(--accent)">${ic('checkmark-circle')}</span>` : ''}</button>`).join('')}</div>
+    <p class="tiny" style="margin:0 4px">Indica a Garmin dove porti la band: serve per misure di battito e sonno più precise.</p>`);
+}
+
+// ---------- corse sull'orologio ----------
+function wantedRuns() {
+  const out = {}, k = C.today();
+  for (let i = 0; i < 7; i++) {
+    const d = C.addDays(k, i);
+    let w = null;
+    if (i === 0) { const dec = dayDecision(d); if (dec.workout?.sport === 'run' && !dec.stopWarning) w = dec.workout; }
+    else if (U.goal) { const s = C.session(U.goal, d); if (s && s.sport === 'run' && s.minutes > 0) w = C.planWorkout(s); }
+    if (!w) continue;
+    const name = `CG Corsa ${C.pretty(d, 'ddmm')} ` + w.name.replace(/^Corsa /, '').replace(/^\w/, c => c.toUpperCase());
+    out[d] = { name, goal: w.goal || w.why || '', steps: w.steps.map(st => ({ seconds: st.seconds, power: st.power, cadence: st.cadence, note: st.note })), sig: name + '|' + w.steps.map(st => `${st.seconds}-${Math.round(st.power * 100)}`).join(',') };
+  }
+  return out;
+}
+function sendRuns() { sendAction({ azione: 'corse', runs: wantedRuns(), today: C.today() }, 'Invio le corse all\'orologio'); }
+function runsCard() {
+  const up = Object.entries(DATA.runWorkouts || {}).filter(([k]) => k >= C.today()).sort();
+  const want = Object.keys(wantedRuns());
+  return card("Corse sull'orologio", 'walk', `<div class="tiny">Le corse dei prossimi 7 giorni vanno in Garmin Connect → Allenamenti e nel calendario, e vengono inviate al Forerunner: sull'orologio le trovi in Allenamento → I miei allenamenti. I rulli restano su MyWhoosh.</div>
+    ${up.map(([k, e]) => `<div class="row"><span style="color:var(--accent)">${ic('checkmark-circle')}</span><span class="grow">${esc(e.name)}</span></div>`).join('') || '<div class="sub">Nessuna corsa caricata per ora.</div>'}
+    <button class="btn soft" data-act="sendruns" ${want.length || up.length ? '' : 'disabled'}>${ic('refresh')}${want.length ? `Aggiorna su Garmin (${want.length} ${want.length === 1 ? 'corsa' : 'corse'})` : 'Nessuna corsa prevista'}</button>`);
+}
+
+// ---------- FTP ----------
+function openFtp() {
+  const mw = DATA.mwFtp, g = DATA.ftp, src = ftpSource();
+  const row = (id, t, d) => `<button class="li" style="width:100%;text-align:left" data-act="ftpset" data-v="${id}"><div class="grow"><div class="ttl">${t}</div><div class="sub">${d}</div></div>${src === id ? `<span style="color:var(--accent)">${ic('checkmark-circle')}</span>` : ''}</button>`;
+  sheet('Fonte FTP', `<div class="sub" style="margin:0 4px">${mw && mw === g ? `La FTP di MyWhoosh (${mw} W) è già su Garmin Connect: le due fonti coincidono.` : 'La FTP serve a calcolare zone e watt degli allenamenti. Se MyWhoosh e Garmin hanno valori diversi, scegli tu quale usare.'}</div>
+    <div class="list">${row('auto', 'Automatica', "MyWhoosh se c'è (misurata sui rulli), altrimenti Garmin.")}${row('mywhoosh', 'MyWhoosh', mw ? `${mw} W · misurata sui rulli` : 'non letta')}${row('garmin', 'Garmin Connect', g ? `${g} W · stimata da Garmin` : 'non disponibile')}${row('manual', 'Inserita a mano', U.ftpManual ? `${U.ftpManual} W` : 'per esempio dopo un test')}</div>
+    ${src === 'manual' ? `<div class="form"><div class="field"><span>FTP a mano</span><input type="number" id="ftpMan" min="80" max="600" value="${U.ftpManual || ''}" placeholder="watt"></div></div>` : ''}`);
+  const f = $('#ftpMan'); if (f) f.onchange = () => { const v = parseInt(f.value, 10); if (v >= 80 && v <= 600) { U.ftpManual = v; saveU(); toast(`FTP ${v} W`); route(); } };
 }
 
 // ---------- PIANO ----------
@@ -424,6 +551,7 @@ function viewPlan() {
     return `<div class="day"><div class="dd ${d === k ? 'today' : ''}"><span>${C.pretty(d, 'wd')}</span><b>${C.toDate(d).getDate()}</b></div><div class="di">${info}</div>${s ? `<span style="color:${C.INT_COLOR[s.intensity]}">${ic(s.sport === 'run' ? 'walk' : 'bicycle')}</span>` : ''}</div>`;
   }).join('');
   out.push(`<section class="card"><div class="week-head"><button data-week="-1" aria-label="Settimana prima">${ic('chevron-back')}</button><span>${C.pretty(dates[0], 'dm')} – ${C.pretty(dates[6], 'dm')}</span><button data-week="1" aria-label="Settimana dopo">${ic('chevron-forward')}</button></div>${rows}</section>`);
+  if ((g.mix || 'bike') !== 'bike') out.push(runsCard());
   out.push(`<button class="btn" data-act="chat">${ic('chatbubbles')}Modifica il piano con la chat</button>`);
   out.push(`<button class="btn plain" data-act="setup">Crea un nuovo piano</button><button class="btn danger" data-act="delgoal">Elimina il piano</button>`);
   $('#view').innerHTML = out.join('');
@@ -584,7 +712,9 @@ function periodPicker() {
 }
 function actRow(a) {
   const met = [a.avgHR && `FC ${a.avgHR}`, a.avgPower && `${a.avgPower} W`, a.trainingEffect && `TE ${C.f1(a.trainingEffect)}`].filter(Boolean).join(' · ');
-  return `<div class="li link" data-act="actdetail" data-id="${esc(a.id)}"><div class="ico-c" style="background:${actColor(a)}">${ic(actIcon(a))}</div><div class="grow"><div class="ttl">${esc(a.garminName || a.type)}</div><div class="sub">${C.pretty(a.key)} · ${esc(a.type)}</div></div>
+  const as = X.assess(a, { activities: DATA.activities, days: DATA.days, ftp: ftp(), blockStart: U.blockStart }), [bl, bc] = X.BENEFIT[as.benefit], [vl, vc] = X.VERDICT[as.verdict];
+  return `<div class="li link" data-act="actdetail" data-id="${esc(a.id)}"><div class="ico-c" style="background:${actColor(a)}">${ic(actIcon(a))}</div><div class="grow"><div class="ttl">${esc(title4(a))}</div><div class="sub">${C.pretty(a.key)} · ${esc(a.type)}</div>
+    <div class="chips" style="margin-top:4px"><span class="chip" style="color:${bc};background:color-mix(in srgb, ${bc} 14%, transparent)">● ${bl}</span><span class="chip" style="color:${vc};background:color-mix(in srgb, ${vc} 14%, transparent)">Settimana: ${vl.toLowerCase()}</span></div></div>
     <div class="right"><div class="mono strong" style="font-size:14.5px">${a.km ? `${C.f1(a.km)} km` : `${a.minutes} min`}</div><div class="tiny">${a.km ? `${hmin(a.minutes)}${a.elevationGain ? ` · +${Math.round(a.elevationGain)} m` : ''}` : met}</div></div></div>`;
 }
 function viewActivities() {
@@ -665,14 +795,19 @@ function openActivity(id) {
   const stat = (k, v) => (v == null || v === '' ? '' : `<div><div class="k">${k}</div><div class="v">${v}</div></div>`);
   const speed = a.km && a.minutes ? a.km / (a.minutes / 60) : null;
   const load = C.recentLoad(DATA.activities, C.addDays(a.key, 1));
-  sheet(a.garminName || a.type, `<div class="tiny" style="margin:0 4px">${C.pretty(a.key, 'long')}${a.startTime ? ` · ${hhmm(a.startTime)}` : ''} · ${esc(a.type)}</div>
+  sheet(title4(a), `<div class="tiny" style="margin:0 4px">${C.pretty(a.key, 'long')}${a.startTime ? ` · ${hhmm(a.startTime)}` : ''} · ${esc(a.type)}</div>
     <section class="card"><div class="stats3" style="row-gap:12px">
       ${stat('Distanza', a.km ? `${C.f1(a.km)} km` : null)}${stat('Tempo', hmin(a.minutes))}${stat(C.isRide(a) ? 'Velocità media' : 'Ritmo', speed ? (C.isRide(a) ? `${C.f1(speed)} km/h` : `${Math.floor(60 / speed)}'${String(Math.round((60 / speed % 1) * 60)).padStart(2, '0')}"/km`) : null)}
       ${stat('FC media', a.avgHR ? `${a.avgHR} bpm` : null)}${stat('Potenza media', a.avgPower ? `${a.avgPower} W` : null)}${stat('Training Effect', a.trainingEffect ? C.f1(a.trainingEffect) : null)}
       ${stat('Carico', a.trainingLoad ? Math.round(a.trainingLoad) : null)}${stat('Dislivello', a.elevationGain ? `+${Math.round(a.elevationGain)} m` : null)}${stat('Velocità max', a.maxSpeed ? `${C.f1(a.maxSpeed * 3.6)} km/h` : null)}
       ${stat('Quota max', a.maxElevation != null ? `${Math.round(a.maxElevation)} m` : null)}</div></section>
     ${load.summary && load.level ? `<div class="banner">${esc(load.summary)}: il giorno dopo il coach ha proposto ${load.level === 2 ? 'recupero' : 'una seduta più leggera'}.</div>` : ''}
-    <a class="btn soft" href="https://connect.garmin.com/modern/activity/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${ic('pulse')}Apri in Garmin Connect</a>`);
+    ${(() => { const as = X.assess(a, { activities: DATA.activities, days: DATA.days, ftp: ftp(), blockStart: U.blockStart }), [bl, bc] = X.BENEFIT[as.benefit], [vl, vc] = X.VERDICT[as.verdict];
+      return `<section class="card"><div class="card-title">${ic('fitness')}Beneficio per il corpo</div><div class="row"><span class="chip" style="color:${bc};background:color-mix(in srgb, ${bc} 14%, transparent)">● ${bl}</span><span class="tiny">Training Effect ${C.f1(as.te)}${as.estimated ? ' (stimato)' : ''}</span></div><div class="sub">${esc(as.comment)}</div><div class="sub"><b>${esc(as.recovery)}</b></div></section>
+      <section class="card"><div class="card-title">${ic('calendar')}${esc(as.title)}</div><div class="row"><span class="chip" style="color:${vc};background:color-mix(in srgb, ${vc} 14%, transparent)">Settimana: ${vl.toLowerCase()}</span></div><div class="sub">${esc(as.summary)}</div>${as.points.map(p => bullet(p, 'chevron-forward', 'var(--muted)')).join('')}</section>
+      <section class="card"><div class="card-title">${ic('pulse')}Nei giorni dopo</div>${as.after.map(p => bullet(p, 'chevron-forward', 'var(--accent)')).join('')}</section>`; })()}
+    <button class="btn soft" data-act="rename" data-id="${esc(a.id)}">${ic('ellipsis-horizontal')}Rinomina</button>
+    <a class="btn plain" href="https://connect.garmin.com/modern/activity/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${ic('pulse')}Apri in Garmin Connect</a>`);
 }
 
 // ---------- ACCOUNT ----------
@@ -692,9 +827,10 @@ function viewAccount() {
     ${DATA.error ? `<div class="li" style="color:var(--orange)">${ic('warning')}<div class="grow">${esc(DATA.error)}</div></div>` : ''}</div>
     <div class="list-foot">${location.hostname.endsWith('github.io') ? 'I dati Garmin si aggiornano da soli circa ogni 15 minuti, anche con il Mac spento.' : 'Con il server sul Mac i dati si aggiornano ogni 15 minuti; ↻ li aggiorna subito.'}</div>`);
   out.push(`<div class="list-h">Allenamento</div><div class="list">
-    <div class="li"><div class="grow">FTP da Garmin</div><b>${DATA.ftp ? DATA.ftp + ' W' : '–'}</b></div>
-    <div class="li"><div class="grow">FTP inserita a mano</div><input type="number" id="ftpIn" min="80" max="600" placeholder="watt" value="${U.ftpManual || ''}" style="width:96px;background:var(--fill);border:0;border-radius:8px;padding:6px 10px"></div></div>
-    <div class="list-foot">Se la inserisci a mano (per esempio quella di MyWhoosh), vale questa per i watt degli allenamenti. Lascia vuoto per usare quella di Garmin.</div>`);
+    <div class="li"><div class="grow">FTP in uso</div><b>${ftp() ? ftp() + ' W' : '–'}</b></div>
+    <div class="li"><div class="grow">MyWhoosh · Garmin</div><b>${DATA.mwFtp ? DATA.mwFtp + ' W' : '–'} · ${DATA.ftp ? DATA.ftp + ' W' : '–'}</b></div>
+    <button class="li" style="width:100%;text-align:left${ftpConflict() ? ';color:var(--orange)' : ''}" data-act="ftpsrc">${ic('flash')}<span class="grow">${ftpConflict() ? 'FTP diverse: scegli la fonte' : 'Scegli la fonte della FTP'}</span>${ic('chevron-forward', 'chev')}</button></div>
+    <div class="list-foot">La FTP regola i watt di tutti gli allenamenti sui rulli.</div>`);
   const acc = MW.account(DATA);
   out.push(`<div class="list-h">MyWhoosh</div><div class="list">
     <div class="li"><div class="grow">Allenamenti MyWhoosh</div><b>${acc ? (acc.expired ? 'accesso scaduto' : 'collegati') : 'non collegati'}</b></div>
@@ -718,7 +854,6 @@ function viewAccount() {
     <div class="list-foot">Piano, check-in e dieta della web app restano in questo browser e non si mischiano con l'app iPhone. Coach Garmin Web · stima dell'app, non un parere medico.</div>`);
   $('#view').innerHTML = out.join('');
   $('#gemIn').onchange = e => { store.set(GKEY, e.target.value.trim()); toast(e.target.value.trim() ? 'Chiave Gemini salvata' : 'Chiave Gemini tolta'); };
-  $('#ftpIn').onchange = e => { const v = parseInt(e.target.value, 10); U.ftpManual = v >= 80 && v <= 600 ? v : null; saveU(); toast(U.ftpManual ? `FTP ${U.ftpManual} W` : 'Uso la FTP di Garmin'); };
   $('#importIn').onchange = async e => {
     try {
       const j = JSON.parse(await e.target.files[0].text());
@@ -864,7 +999,7 @@ function openRunAI() {
       <section class="card"><div class="card-title">${ic('walk')}${esc(w.name)}</div><div class="chips"><span class="chip">${w.minutes} min</span><span class="chip">corsa a tempo</span><span class="chip">${model === 'Gemini' ? 'Gemini' : 'coach sulle tue parole'}</span></div>
       ${profile(w.steps)}${stepsTable(w, w.steps)}<div class="sub">${esc(r.explanation)}</div>
       <button class="btn" id="runSave">${ic('checkmark-circle')}Usa questa corsa oggi</button></section>`;
-    $('#runSave').onclick = () => { U.aiRuns[k] = r; for (const x of Object.keys(U.aiRuns)) if (x < C.addDays(k, -7)) delete U.aiRuns[x]; saveU(); closeSheet(); route(); toast('Corsa di oggi impostata'); };
+    $('#runSave').onclick = () => { U.aiRuns[k] = r; for (const x of Object.keys(U.aiRuns)) if (x < C.addDays(k, -7)) delete U.aiRuns[x]; saveU(); closeSheet(); route(); toast('Corsa di oggi impostata'); if (repoInfo() && ghToken()) setTimeout(sendRuns, 1500); };
   };
 }
 
@@ -892,6 +1027,23 @@ document.addEventListener('click', async e => {
   if (a === 'mwupload') return mwUpload();
   if (a === 'mwlib') return mwLibrary();
   if (a === 'naps') return openNaps();
+  if (a === 'napnew') return openNapForm();
+  if (a === 'napedit') return openNapForm(t.dataset.day, +t.dataset.start, +t.dataset.end);
+  if (a === 'napdel') { if (confirm('Eliminare questo sonnellino da Garmin?')) sendAction({ azione: 'sonnellino-del', day: t.dataset.day, start: +t.dataset.start }, 'Elimino il sonnellino'); return; }
+  if (a === 'alarms') { ALARMS = null; return openAlarms(); }
+  if (a === 'alarmnew') return openAlarmEdit(null);
+  if (a === 'alarmedit') return openAlarmEdit(+t.dataset.i);
+  if (a === 'wear') return openWear();
+  if (a === 'wearset') return sendAction({ azione: 'posizione', value: t.dataset.v }, 'Aggiorno la posizione');
+  if (a === 'sendruns') return sendRuns();
+  if (a === 'ftpsrc') return openFtp();
+  if (a === 'ftpset') { U.ftpSource = t.dataset.v; saveU(); route(); return openFtp(); }
+  if (a === 'rename') {
+    const ac = DATA.activities.find(x => x.id === t.dataset.id); if (!ac) return;
+    const n = prompt('Nuovo nome dell\'attività', title4(ac)); if (!n || !n.trim()) return;
+    U.names = { ...(U.names || {}), [ac.id]: n.trim() }; saveU(); route();
+    return sendAction({ azione: 'rinomina', activityId: ac.id, name: n.trim() }, 'Rinomino su Garmin');
+  }
   if (a === 'info') return openInfo(t.dataset.id);
   if (a === 'prontezza') return sheet('Prontezza', `<section class="card"><div class="sub" style="display:flex;flex-direction:column;gap:10px">
     <p style="margin:0"><b>Notte (40%)</b> — come fa WHOOP: HRV, FC a riposo, sonno, respirazione e stress di stanotte confrontati con le tue ultime 4 settimane. Vede subito una notte storta, ma da sola è ballerina.</p>

@@ -411,6 +411,13 @@ export async function sync({ days = 3 } = {}) {
       if (Array.isArray(devs)) c.devices = devs.map(d => ({ id: String(d.deviceId ?? d.unitId ?? ''), name: d.displayName || d.productDisplayName || 'Dispositivo' }));
       c.devicesAt = Date.now();
     }
+    // impostazioni della CIRQA: sveglie e posizione di indosso (una richiesta a giro)
+    const cirqa = (c.devices || []).find(d => /cirqa/i.test(d.name)) || (c.devices || [])[0];
+    if (cirqa?.id) {
+      const st = await opt(`/device-service/deviceservice/device-info/settings/${cirqa.id}`);
+      if (st) c.cirqa = { deviceId: cirqa.id, name: cirqa.name, alarms: Array.isArray(st.alarms) ? st.alarms : [], mountingSide: st.mountingSide || null, at: Date.now() };
+    }
+    if (!c.profilePk) { const p = await opt('/userprofile-service/socialProfile'); c.profilePk = p?.profileId ?? p?.id ?? null; }
     // tiene al massimo ~14 mesi di giorni
     const min = addDays(today(), -430);
     for (const k of Object.keys(c.days)) if (k < min) delete c.days[k];
@@ -510,13 +517,97 @@ export async function importMyWhoosh(c) {
   return up;
 }
 
+/** FTP del profilo MyWhoosh (una volta ogni 6 ore). */
+export async function myWhooshFtp(c) {
+  const m = loadMyWhoosh();
+  if (!m?.token || (c.mwFtpAt && Date.now() - c.mwFtpAt < 6 * 3600e3)) return;
+  try {
+    const r = await fetch('https://services.mywhoosh.com/http-service/v1/player/player-data', { method: 'POST', headers: { Authorization: 'Bearer ' + m.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ WhooshId: m.userId }), signal: AbortSignal.timeout(30e3) });
+    const t = await r.text(); const f = t.match(/"FtpPlayer"\s*:\s*([0-9.]+)/);
+    if (r.ok && f && +f[1] > 0) { c.mwFtp = Math.round(+f[1]); c.mwFtpAt = Date.now(); }
+  } catch { }
+}
+
+// ---------- modifiche su Garmin chieste dalla web app ----------
+const RUNNING = { sportTypeId: 1, sportTypeKey: 'running' };
+function runPayload(w, name) {
+  const steps = w.steps, n = steps.length;
+  return {
+    workoutName: name, description: 'Coach Garmin · ' + (w.goal || ''), sportType: RUNNING,
+    estimatedDurationInSecs: steps.reduce((a, s) => a + s.seconds, 0),
+    workoutSegments: [{ segmentOrder: 1, sportType: RUNNING, workoutSteps: steps.map((s, i) => {
+      const main = s.cadence != null, walk = s.power < 0.47;
+      const type = walk && i > 0 && i < n - 1 ? [4, 'recovery'] : main ? [3, 'interval'] : i === 0 ? [1, 'warmup'] : i === n - 1 ? [2, 'cooldown'] : [4, 'recovery'];
+      return { type: 'ExecutableStepDTO', stepOrder: i + 1, stepType: { stepTypeId: type[0], stepTypeKey: type[1] },
+        endCondition: { conditionTypeId: 2, conditionTypeKey: 'time' }, endConditionValue: s.seconds,
+        targetType: { workoutTargetTypeId: 1, workoutTargetTypeKey: 'no.target' },
+        description: s.note || (walk ? 'Cammino' : main ? 'Corsa' : type[1] === 'warmup' ? 'Corsa lenta per scaldarsi' : type[1] === 'cooldown' ? 'Corsa lenta per finire' : 'Corsa lenta') };
+    }) }],
+  };
+}
+const gmtString = ms => new Date(ms).toISOString().replace('Z', '').slice(0, 23);
+/**
+ * Esegue una modifica su Garmin. Ritorna il messaggio per l'utente.
+ * azioni: rinomina, sonnellino-add, sonnellino-del, sveglie, posizione, corse.
+ */
+export async function doAction(req) {
+  const c = loadCache();
+  const dev = c.cirqa?.deviceId;
+  switch (req.azione) {
+    case 'rinomina':
+      await api('PUT', `/activity-service/activity/${req.activityId}`, {}, { activityId: Number(req.activityId), activityName: String(req.name).slice(0, 100) });
+      return 'Nome aggiornato su Garmin Connect.';
+    case 'sonnellino-add': {
+      let pk = c.profilePk;
+      if (!pk) { const p = await get('/userprofile-service/socialProfile'); pk = p?.profileId; }
+      await api('POST', '/sleep-service/sleep/nap', {}, { calendarDate: req.day, napStartTimestampGMT: gmtString(req.start), napEndTimestampGMT: gmtString(req.end), userProfilePK: pk });
+      return 'Sonnellino salvato su Garmin.';
+    }
+    case 'sonnellino-del':
+      await api('DELETE', `/sleep-service/sleep/nap/${req.day}/${Math.round(req.start)}`);
+      return 'Sonnellino eliminato da Garmin.';
+    case 'sveglie':
+      if (!dev) throw new Error('Non trovo la CIRQA tra i dispositivi Garmin.');
+      await api('PUT', `/device-service/deviceservice/device-info/settings/${dev}`, {}, { deviceId: Number(dev) || dev, alarms: req.alarms });
+      return 'Sveglie inviate alla CIRQA: arrivano alla prossima sincronizzazione della band.';
+    case 'posizione':
+      if (!dev) throw new Error('Non trovo la CIRQA tra i dispositivi Garmin.');
+      await api('PUT', `/device-service/deviceservice/device-info/settings/${dev}`, {}, { deviceId: Number(dev) || dev, mountingSide: req.value });
+      return 'Posizione aggiornata: arriva alla CIRQA alla prossima sincronizzazione.';
+    case 'corse': {
+      // allinea gli allenamenti di corsa dei prossimi giorni (I miei allenamenti + calendario + invio al Forerunner)
+      const map = c.runWorkouts || {}, wanted = req.runs || {}, today = req.today;
+      const watch = (c.devices || []).find(d => /forerunner/i.test(d.name)) || (c.devices || []).find(d => /fenix|fēnix|venu|vivoactive|instinct|epix|enduro/i.test(d.name));
+      let added = 0, removed = 0, sent = 0;
+      for (const [k, e] of Object.entries(map)) {
+        const w = wanted[k];
+        if (k >= addDays(today, -1) && w && w.sig === e.sig) continue;
+        try { await api('DELETE', `/workout-service/workout/${e.id}`); } catch (er) { if (!/404/.test(er.message)) continue; }
+        delete map[k]; if (!w && k >= today) removed++;
+      }
+      for (const [k, w] of Object.entries(wanted).sort()) {
+        if (map[k] || k < today) continue;
+        const created = await api('POST', '/workout-service/workout', {}, runPayload(w, w.name));
+        const id = created?.workoutId; if (!id) continue;
+        await api('POST', `/workout-service/schedule/${id}`, {}, { date: k });
+        map[k] = { id, sig: w.sig, name: w.name }; added++;
+        if (watch) { try { await api('POST', '/device-service/devicemessage/messages', {}, [{ deviceId: Number(watch.id) || watch.id, messageUrl: `workout-service/workout/FIT/${id}`, messageType: 'workouts', messageName: w.name, groupName: null, priority: 1, fileType: 'FIT', metaDataId: id }]); sent++; } catch { } }
+      }
+      c.runWorkouts = map; saveCache(c);
+      if (!added && !removed) return 'Corse su Garmin già aggiornate.';
+      return `Garmin Connect: ${added} ${added === 1 ? 'corsa caricata' : 'corse caricate'}${sent && watch ? ` e inviate al ${watch.name}` : ''}${removed ? `, ${removed} tolte` : ''}.`;
+    }
+    default: throw new Error('Azione sconosciuta.');
+  }
+}
+
 /** Esito dell'ultimo collegamento chiesto dalla web app (stesso giro di GitHub Actions). */
 export function loadEsito() { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'esito.json'), 'utf8')); } catch { return null; } }
 
 /** Dati per la web app (senza il token Garmin né campi interni). */
 export function publicData(c) {
   return {
-    mwImport: c.mwLast || null, mywhoosh: loadMyWhoosh(), mywhooshAuto: myWhooshAuto(), esito: loadEsito(), garminLinked: !!loadTokens(),
+    mwImport: c.mwLast || null, mwFtp: c.mwFtp || null, cirqa: c.cirqa || null, runWorkouts: c.runWorkouts || {}, mywhoosh: loadMyWhoosh(), mywhooshAuto: myWhooshAuto(), esito: loadEsito(), garminLinked: !!loadTokens(),
     updated: c.lastSync || null, error: c.lastSyncError || null, profile: c.profile || null,
     days: Object.values(c.days).sort((a, b) => (a.key < b.key ? -1 : 1)),
     activities: c.activities, devices: c.devices || [], ftp: c.ftp || null,

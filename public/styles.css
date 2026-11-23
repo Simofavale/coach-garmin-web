@@ -254,3 +254,11 @@ h1, h2, h3 { font-family: var(--f-title); margin: 0; letter-spacing: -.01em; }
 .gbtn .gedit { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: var(--gc); background: var(--card); }
 .gbtn .gedit svg.ion { width: 16px; height: 16px; }
 .seg button { font-size: 12.5px; }
+
+/* consigli del giorno */
+details.ins { border-top: 1px solid var(--line); padding: 6px 0; }
+details.ins summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 14.5px; }
+details.ins summary::-webkit-details-marker { display: none; }
+details.ins summary svg.ion { width: 18px; height: 18px; }
+.banner.link { cursor: pointer; display: flex; gap: 6px; align-items: center; }
+.banner.link svg.ion { width: 17px; height: 17px; flex: none; }

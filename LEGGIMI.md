@@ -9,7 +9,9 @@ Stessa impostazione di **Rassegna**: sito su GitHub Pages, dati cifrati che si a
 - **Oggi**: Body Battery, sonno, HRV, Training Readiness, FC a riposo, stato di salute, sonnellini, recupero con semaforo e allenamento del giorno (watt calcolati sulla FTP), check-in delle sensazioni.
 - **Piano**: obiettivo (gara, forma fisica, potenza), giorni, ore, solo rulli / corsa e rulli / solo corsa, calendario della settimana, allenamento in più, chat per modificarlo ("oggi non posso", "più facile"…).
 - **Dieta**: le stesse regole della scheda Dieta (14 pasti, pasto libero, colazione, frutta, dosi ridotte).
-- **Attività**: km in bici e a piedi (settimana, mese, anno) ed elenco delle attività Garmin.
+- **Attività**: come nell'app: periodo, pulsanti In bici / A piedi modificabili, totali, record, bollini beneficio e settimana, dettaglio con i giorni dopo, rinomina. Tutte le attività Garmin; le uscite MyWhoosh vengono caricate su Garmin da sole.
+- **Oggi** ha anche: consigli sui dati, sonnellini (aggiungi, modifica, elimina), sveglie e posizione della CIRQA, scelta della FTP (MyWhoosh o Garmin).
+- **Piano**: le corse dei prossimi 7 giorni vanno su Garmin Connect e al Forerunner.
 - **Account**: stato di Garmin, FTP, link privato, copia di sicurezza di piano/check-in/dieta.
 
 Piano, check-in e dieta restano **nel browser del dispositivo** (non si mischiano con l'app iPhone).

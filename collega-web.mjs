@@ -4,7 +4,7 @@
 // una volta e non vengono salvati né scritti nel registro: resta solo il token, cifrato con TOKEN_KEY.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, decrypt, exchangeTicket, loginGarmin, loginMyWhoosh } from './garmin.mjs';
+import { ROOT, decrypt, exchangeTicket, loginGarmin, loginMyWhoosh, doAction } from './garmin.mjs';
 
 const out = esito => {
   fs.writeFileSync(path.join(ROOT, 'data', 'esito.json'), JSON.stringify({ ...esito, at: Date.now() }));
@@ -30,6 +30,10 @@ try {
   } else if (req.tipo === 'mywhoosh') {
     const { exp, n } = await loginMyWhoosh(String(req.email || '').trim(), String(req.password || ''));
     out({ id: req.id, tipo: 'mywhoosh', ok: true, msg: 'MyWhoosh collegato' + (n != null ? ` (${n} allenamenti salvati)` : '') + (exp ? `, valido fino al ${new Date(exp).toLocaleDateString('it-IT')}` : '') + '.' });
+  } else if (req.tipo === 'azione') {
+    let msg = await doAction(req);
+    if (req.then) msg = await doAction(req.then);   // es. modifica sonnellino = elimina + ricrea
+    out({ id: req.id, tipo: 'azione', azione: req.azione, ok: true, msg });
   } else throw new Error('Richiesta sconosciuta.');
 } catch (e) {
   out({ id: req.id, tipo: req.tipo, ok: false, msg: e.message + (req.tipo === 'garmin' && !req.email ? ' Il codice vale pochi minuti e una volta sola: rifai l\'accesso a Garmin.' : '') });

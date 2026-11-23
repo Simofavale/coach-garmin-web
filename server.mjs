@@ -7,7 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { ROOT, sync, publicData, loadCache, encrypt, localKeys, addDays, today, loadEsito, renewMyWhoosh, importMyWhoosh, saveCache } from './garmin.mjs';
+import { ROOT, sync, publicData, loadCache, encrypt, localKeys, addDays, today, loadEsito, renewMyWhoosh, importMyWhoosh, saveCache, myWhooshFtp } from './garmin.mjs';
 
 const PORT = Number(process.env.PORT) || 5174;
 const PUB = path.join(ROOT, 'public');
@@ -38,7 +38,7 @@ function demoData() {
     if (wd === 2 && rnd() < 0.5) activities.push({ id: 'c' + i, key: k, type: 'Corsa', minutes: 35 + Math.round(rnd() * 15), km: Math.round((5 + rnd() * 3) * 10) / 10, avgHR: 140 + Math.round(rnd() * 10), trainingEffect: 2.8, trainingLoad: 60, startTime: Date.parse(k + 'T07:00'), garminName: 'Corsa' });
   }
   activities.sort((a, b) => b.startTime - a.startTime);
-  return { updated: Date.now() - 4 * 60e3, error: null, profile: { name: 'Prova' }, demo: true, mywhoosh: null, days, activities, devices: [{ id: '1', name: 'CIRQA' }, { id: '2', name: 'Forerunner 255' }], ftp: 215 };
+  return { updated: Date.now() - 4 * 60e3, error: null, profile: { name: 'Prova' }, demo: true, mywhoosh: null, mwFtp: 147, cirqa: { deviceId: '1', name: 'CIRQA', mountingSide: 'RIGHT_UPPER_ARM', alarms: [{ alarmId: 1, alarmTime: 330, alarmDays: ['M', 'Tu', 'W', 'Th', 'F'], alarmMode: 'ON', alarmSound: 'VIBRATION', backlight: 'ON' }] }, runWorkouts: {}, days, activities, devices: [{ id: '1', name: 'CIRQA' }, { id: '2', name: 'Forerunner 255' }], ftp: 215 };
 }
 
 // ---------- server locale ----------
@@ -57,6 +57,7 @@ if (arg('--build')) {
   let c = await sync({ days: 3 });
   await renewMyWhoosh();
   // uscite MyWhoosh su Garmin; se ne ha caricate, riprende subito le attività da Garmin
+  await myWhooshFtp(c);
   if (await importMyWhoosh(c)) { saveCache(c); await new Promise(r => setTimeout(r, 15e3)); c = await sync({ days: 1 }); }
   else saveCache(c);
   // anche senza dati (Garmin non ancora collegato) il sito si pubblica: l'app mostra cosa fare

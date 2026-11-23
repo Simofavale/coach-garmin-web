@@ -14,7 +14,7 @@ Versione web (PWA) dell'app iPhone Coach Garmin (`../Coach Garmin`). Impostazion
 - AI della corsa: **Gemini** (scelta di Simone, livello gratuito), chiave in localStorage del dispositivo, chiamata diretta dal browser (CORS ok). Riserva senza AI: `rulePlan` (come RunNotePlanner.swift).
 - MyWhoosh: API coaching.mywhoosh.com chiamata dal browser (CORS *); l'accesso del sito (event.mywhoosh.com) ha il reCAPTCHA: si usa quello dell'app (services.mywhoosh.com/http-service/api/login, come il progetto mywhoosh-to-garmin) e si verifica il codice sulla libreria allenamenti.
 - Collegamenti **solo dalla web app** (richiesta di Simone): Account → Collegamenti cifra la richiesta (ticket Garmin / email+password MyWhoosh) con DATA_KEY e avvia il workflow con l'input `richiesta`; `collega-web.mjs` la esegue, scrive `data/esito.json` (finisce in garmin.json e version.json) e i token cifrati vengono committati. Garmin (diauth, connectapi) e MyWhoosh login bloccano il CORS: niente chiamate dirette dal browser. Il pulsante ↻ e i collegamenti usano un token GitHub `github_pat_` (solo Actions) salvato nel dispositivo.
-- Da fare: invio corse al Forerunner, sonnellini e sveglie CIRQA, import uscite MyWhoosh su Garmin, rinomina attività (scritture su Garmin: via GitHub Actions o server sul Mac).
+- Scritture su Garmin dalla web app: richiesta cifrata `tipo: 'azione'` → `doAction` in garmin.mjs (rinomina, sonnellino-add/del, sveglie, posizione, corse al Forerunner). Uscite MyWhoosh caricate su Garmin a ogni giro (`importMyWhoosh`). FTP MyWhoosh da player-data. Valutazione attività e consigli in `public/extra.js`.
 
 > Regole generali in `~/.studio-locale/AGENTS.md`, preferenze in `~/.studio-locale/progetti/MEMORIA.md`.
 
