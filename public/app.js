@@ -133,6 +133,7 @@ async function runOnGitHub(richiesta, label, done, onDone, retry) {
     if (res.status === 401 || res.status === 403 || res.status === 404) { store.set(GH_KEY, ''); toast('Autorizzazione GitHub non valida: ricollegala', 5000); return openGhSetup(retry); }
     if (!res.ok) throw new Error('GitHub ha risposto ' + res.status);
   } catch (e) { return toast('Non riesco ad avviare: ' + e.message, 5000); }
+  toast(richiesta ? 'Richiesta inviata a GitHub' : 'Aggiornamento avviato', 3000);
   // aspetta il risultato (di solito 1–2 minuti) mostrando il tempo che passa
   const t0 = Date.now();
   refreshing = setInterval(async () => {
@@ -143,7 +144,7 @@ async function runOnGitHub(richiesta, label, done, onDone, retry) {
     try { v = await (await fetch('api/version.json?t=' + Date.now(), { cache: 'no-store' })).json(); } catch { }
     if (v && done(v)) { clearInterval(refreshing); refreshing = null; await onDone(); }
     else if (sec > 300) { clearInterval(refreshing); refreshing = null; setSpin(false); toast('Ci sta mettendo più del solito: il risultato arriverà da solo fra poco.', 5000); }
-  }, 6000);
+  }, 4000);
 }
 /** Cifra la richiesta con la chiave del link privato: solo GitHub (che ha la stessa chiave segreta) la può leggere. */
 async function encryptRequest(obj) {
@@ -167,22 +168,17 @@ async function sendLink(obj, label) {
     else sheet('Collegamento non riuscito', `<div class="banner">${esc(e?.msg || 'Errore sconosciuto.')}</div><button class="btn" data-act="${obj.tipo === 'garmin' ? 'linkgarmin' : 'linkmw'}">Riprova</button>`);
   }, () => sendLink(obj, label));
 }
-const GARMIN_SIGNIN = 'https://sso.garmin.com/sso/login?service=' + encodeURIComponent('https://sso.garmin.com/sso/embed');
 function openLinkGarmin() {
-  sheet('Collega Garmin', `<section class="card"><div class="sub" style="display:flex;flex-direction:column;gap:8px">
-    <p style="margin:0"><b>1.</b> Tocca il pulsante e accedi con email e password Garmin. La password la vede solo Garmin.</p></div>
-    <button class="btn" data-act="garminsignin">Apri la pagina di accesso Garmin</button>
-    <div class="sub" style="display:flex;flex-direction:column;gap:8px">
-    <p style="margin:0"><b>2.</b> Dopo l'accesso si apre una pagina quasi vuota "sso.garmin.com/sso/embed". Copia il suo <b>indirizzo completo</b> dalla barra in alto (contiene "ticket=ST-…").</p>
-    <p style="margin:0"><b>3.</b> Torna qui, incollalo e tocca Collega. Fallo subito: il codice vale pochi minuti.</p></div>
-    <input type="text" id="ticketIn" placeholder="Incolla qui l'indirizzo con ticket=ST-…" autocapitalize="off" autocorrect="off" spellcheck="false" style="border:1.5px solid var(--line);border-radius:12px;padding:12px;background:var(--bg)">
-    <p id="ticketMsg" class="tiny" style="margin:0"></p>
-    <div class="tiny">Se sull'iPhone si apre l'app Garmin Connect invece della pagina, fai questo passaggio dal browser del Mac. Il collegamento passa da GitHub, cifrato, e richiede 1–2 minuti.</div></section>`,
+  sheet('Collega Garmin', `<section class="card"><div class="sub">Scrivi email e password del tuo account <b>Garmin Connect</b>. Partono cifrate, servono una volta sola per entrare e <b>non vengono salvate</b>: si conserva solo il codice di accesso, cifrato.</div>
+    <div class="form"><div class="field"><input type="email" id="gEmail" placeholder="Email Garmin" autocomplete="username" autocapitalize="off" spellcheck="false" style="max-width:none;width:100%;background:var(--fill);border:0;border-radius:8px;padding:6px 10px"></div>
+    <div class="field"><input type="password" id="gPass" placeholder="Password Garmin" autocomplete="current-password" style="max-width:none;width:100%;background:var(--fill);border:0;border-radius:8px;padding:6px 10px"></div></div>
+    <p id="gMsg" class="tiny" style="margin:0"></p>
+    <div class="tiny">Garmin non accetta accessi da una pagina web: l'accesso lo fa GitHub per te (circa un minuto). Se il tuo account ha la verifica in due passaggi, per ora non funziona.</div></section>`,
   { right: 'Collega', left: 'Annulla' });
   sheet.ok = () => {
-    const v = $('#ticketIn').value.trim(), ticket = v.match(/ST-[\w.-]+/)?.[0];
-    if (!ticket) { $('#ticketMsg').textContent = 'Non trovo "ticket=ST-…" in quello che hai incollato.'; return; }
-    sendLink({ tipo: 'garmin', ticket, service: /sso\/embed/.test(v) ? 'embed' : 'mobile' }, 'Collego Garmin');
+    const email = $('#gEmail').value.trim(), password = $('#gPass').value;
+    if (!/@/.test(email) || !password) { $('#gMsg').textContent = 'Scrivi email e password.'; return; }
+    sendLink({ tipo: 'garmin', email, password }, 'Collego Garmin');
   };
 }
 function openLinkMyWhoosh() {
@@ -776,12 +772,7 @@ document.addEventListener('click', async e => {
   if (a === 'reload') return location.reload();
   if (a === 'refresh') return refreshNow();
   if (a === 'linkgarmin') return openLinkGarmin();
-  if (a === 'garminsignin') {
-    // finestra nuova se il browser la permette, altrimenti nella stessa (poi si torna indietro: il link resta salvato)
-    const w = window.open(GARMIN_SIGNIN, '_blank');
-    if (!w) { store.set('coachgarmin:apri-collega', Date.now()); location.href = GARMIN_SIGNIN; }
-    return;
-  }
+
   if (a === 'linkmw') return openLinkMyWhoosh();
   if (a === 'ghon') return openGhSetup(() => { route(); refreshNow(); });
   if (a === 'ghoff') { store.set(GH_KEY, ''); route(); return toast('GitHub scollegato da questo dispositivo'); }
@@ -825,7 +816,4 @@ document.addEventListener('click', async e => {
 // ---------- avvio ----------
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
 if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/oggi');
-loadData().then(() => {
-  const t = store.get('coachgarmin:apri-collega', 0);
-  if (t && Date.now() - t < 15 * 60e3) { store.set('coachgarmin:apri-collega', 0); location.hash = '#/account'; openLinkGarmin(); toast('Incolla qui l\'indirizzo della pagina Garmin', 5000); }
-});
+loadData();

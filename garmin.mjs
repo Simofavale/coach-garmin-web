@@ -132,6 +132,37 @@ async function exchangeEmbedTicket(ticket) {
   saveTokens(t); return t;
 }
 
+/**
+ * Accesso completo con email e password (come la libreria garth): pagina di accesso classica → ticket → token.
+ * Tutto in pochi secondi, quindi il ticket non fa in tempo a scadere. La password non viene salvata.
+ */
+export async function loginGarmin(email, password) {
+  const SSO = 'https://sso.garmin.com/sso', jar = new Map();
+  const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+  const req = async (url, opts = {}) => {
+    const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30e3), ...opts, headers: { 'User-Agent': UA, Cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; '), ...(opts.headers || {}) } });
+    for (const c of r.headers.getSetCookie?.() || []) { const [kv] = c.split(';'); const i = kv.indexOf('='); jar.set(kv.slice(0, i).trim(), kv.slice(i + 1)); }
+    return r;
+  };
+  const embed = new URLSearchParams({ id: 'gauth-widget', embedWidget: 'true', gauthHost: SSO });
+  const signin = new URLSearchParams({ id: 'gauth-widget', embedWidget: 'true', gauthHost: EMBED, service: EMBED, source: EMBED, redirectAfterAccountLoginUrl: EMBED, redirectAfterAccountCreationUrl: EMBED });
+  await req(`${SSO}/embed?${embed}`);
+  const page = await (await req(`${SSO}/signin?${signin}`, { headers: { Referer: `${SSO}/embed?${embed}` } })).text();
+  const csrf = page.match(/name="_csrf"\s+value="([^"]+)"/)?.[1];
+  if (!csrf) throw new Error('La pagina di accesso di Garmin non ha risposto come previsto: riprova fra qualche minuto.');
+  const r = await req(`${SSO}/signin?${signin}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Referer: `${SSO}/signin?${signin}`, Origin: 'https://sso.garmin.com' },
+    body: new URLSearchParams({ username: email, password, embed: 'true', _csrf: csrf }).toString(),
+  });
+  if (r.status === 429) throw new Error('Garmin ha bloccato per un po\' i tentativi di accesso: riprova fra 15–30 minuti.');
+  const html = await r.text();
+  const title = html.match(/<title>([^<]*)<\/title>/i)?.[1] || '';
+  if (/mfa|verif/i.test(title) || /mfa-code|verifyMFA/i.test(html)) throw new Error('Il tuo account Garmin ha la verifica in due passaggi: per ora la web app non la gestisce. Disattivala in Garmin Connect o dimmelo e la aggiungo.');
+  const ticket = html.match(/embed\?ticket=([^"&]+)/)?.[1];
+  if (!ticket) throw new Error(/locked|bloccat/i.test(html) ? 'Account Garmin bloccato temporaneamente per troppi tentativi: riprova più tardi.' : 'Email o password Garmin non corrette.');
+  return exchangeEmbedTicket(ticket);
+}
+
 export async function exchangeTicket(ticket, service = 'mobile') {
   if (service === 'embed') return exchangeEmbedTicket(ticket);
   let last = 'nessuna risposta';

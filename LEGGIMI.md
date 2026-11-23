@@ -16,7 +16,7 @@ Piano, check-in e dieta restano **nel browser del dispositivo** (non si mischian
 
 ## Cosa fare (Simone)
 Tutto dalla web app, aprendola dal **link privato** (sul Mac è in `data/link-privato.txt`):
-1. **Account → Collegamenti → Garmin Connect**: apri la pagina di Garmin, accedi (la password la vede solo Garmin), copia l'indirizzo della pagina che compare dopo ("ticket=ST-…") e incollalo. Fallo dal browser del Mac se sull'iPhone si apre l'app Garmin Connect.
+1. **Account → Collegamenti → Garmin Connect**: email e password Garmin, che partono cifrate e non vengono salvate (l'accesso lo fa GitHub in pochi secondi, metodo "garth"). Non funziona se l'account ha la verifica in due passaggi.
 2. **Account → Collegamenti → MyWhoosh**: email e password, che partono cifrate e non vengono salvate.
 3. La prima volta ti chiede l'**autorizzazione GitHub** (codice `github_pat_…`, permesso solo "Actions"): serve anche al pulsante ↻ per aggiornare subito.
 4. **Gemini**: crea gratis una chiave su aistudio.google.com/apikey e incollala in Account → Chiave Gemini.

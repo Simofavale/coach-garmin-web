@@ -4,7 +4,7 @@
 // una volta e non vengono salvati né scritti nel registro: resta solo il token, cifrato con TOKEN_KEY.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, decrypt, exchangeTicket, loginMyWhoosh } from './garmin.mjs';
+import { ROOT, decrypt, exchangeTicket, loginGarmin, loginMyWhoosh } from './garmin.mjs';
 
 const out = esito => {
   fs.writeFileSync(path.join(ROOT, 'data', 'esito.json'), JSON.stringify({ ...esito, at: Date.now() }));
@@ -20,14 +20,17 @@ if (!req.at || Date.now() - req.at > 15 * 60e3) { out({ id: req.id, tipo: req.ti
 
 try {
   if (req.tipo === 'garmin') {
-    const ticket = String(req.ticket || '').match(/ST-[\w.-]+/)?.[0];
-    if (!ticket) throw new Error('Nel testo incollato non trovo il codice "ticket=ST-…".');
-    await exchangeTicket(ticket, /sso\/embed/.test(String(req.ticket)) || req.service === 'embed' ? 'embed' : 'mobile');
+    if (req.email) await loginGarmin(String(req.email).trim(), String(req.password || ''));
+    else {
+      const ticket = String(req.ticket || '').match(/ST-[\w.-]+/)?.[0];
+      if (!ticket) throw new Error('Nel testo incollato non trovo il codice "ticket=ST-…".');
+      await exchangeTicket(ticket, /sso\/embed/.test(String(req.ticket)) || req.service === 'embed' ? 'embed' : 'mobile');
+    }
     out({ id: req.id, tipo: 'garmin', ok: true, msg: 'Garmin collegato: i tuoi dati arrivano adesso.' });
   } else if (req.tipo === 'mywhoosh') {
     const { exp } = await loginMyWhoosh(String(req.email || '').trim(), String(req.password || ''));
     out({ id: req.id, tipo: 'mywhoosh', ok: true, msg: 'MyWhoosh collegato' + (exp ? `, valido fino al ${new Date(exp).toLocaleDateString('it-IT')}` : '') + '.' });
   } else throw new Error('Richiesta sconosciuta.');
 } catch (e) {
-  out({ id: req.id, tipo: req.tipo, ok: false, msg: e.message + (req.tipo === 'garmin' ? ' Il codice vale pochi minuti e una volta sola: rifai l\'accesso a Garmin.' : '') });
+  out({ id: req.id, tipo: req.tipo, ok: false, msg: e.message + (req.tipo === 'garmin' && !req.email ? ' Il codice vale pochi minuti e una volta sola: rifai l\'accesso a Garmin.' : '') });
 }
