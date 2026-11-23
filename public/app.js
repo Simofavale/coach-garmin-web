@@ -61,7 +61,7 @@ const UKEY = 'coachgarmin:utente';
 const U = Object.assign({ checkIns: {}, goal: null, chat: [], blockStart: C.startOfWeek(C.today()), ftpManual: null, aiRuns: {} }, store.get(UKEY, {}));
 U.aiRuns = U.aiRuns || {};
 const GKEY = 'coachgarmin:gemini';
-const geminiKey = () => store.get(GKEY, '');
+const geminiKey = () => store.get(GKEY, '') || DATA?.geminiKey || '';
 let MWLIST = null, MWSTATE = '';   // allenamenti salvati su MyWhoosh (letti all'apertura)
 const saveU = () => store.set(UKEY, U);
 let DATA = null, DIET = D.load(), weekOffset = 0, dietCat = 'carbo', loading = false;
@@ -294,7 +294,6 @@ function viewToday() {
   const h = C.health(t, days), ci = U.checkIns[k];
   const adj = C.adjustToday(dec, t, ci);
   const out = [];
-  if (ftpConflict()) out.push(`<div class="banner link" data-act="ftpsrc">${ic('flash')} FTP diversa tra MyWhoosh (${DATA.mwFtp} W) e Garmin (${DATA.ftp} W): uso MyWhoosh. Tocca per scegliere.</div>`);
   out.push(DATA.error ? `<div class="syncbar warn">${ic('warning')}${esc(DATA.error)}</div>`
     : `<div class="syncbar">${ic('checkmark-circle')}Garmin aggiornato ${DATA.updated ? ago(DATA.updated) : '–'}${DATA.demo ? ' · <b>dati di prova</b>' : ''}</div>`);
   // essenziali Garmin
@@ -915,7 +914,7 @@ function viewAccount() {
     <div class="list-foot">${acc ? (acc.exp ? `Accesso valido fino al ${new Date(acc.exp).toLocaleDateString('it-IT')}${DATA.mywhooshAuto ? ', poi si rinnova da solo' : ''}. ` : '') + 'Nei giorni di rulli la web app ti dice quale allenamento usare e, se serve, ne carica uno su misura (in MyWhoosh: Allenamenti › I miei allenamenti).' : 'Collegali da "Collegamenti" qui sopra.'}${MWSTATE ? ' ' + esc(MWSTATE) : ''}</div>`);
   out.push(`<div class="list-h">Corsa con l'AI (Gemini)</div><div class="list">
     <div class="li"><div class="grow">Chiave Gemini</div><input type="password" id="gemIn" placeholder="incolla la chiave" value="${esc(geminiKey())}" autocomplete="off" style="width:160px;background:var(--fill);border:0;border-radius:8px;padding:6px 10px"></div></div>
-    <div class="list-foot">Gratis: crea la chiave su <b>aistudio.google.com/apikey</b> (account Google, "Create API key") e incollala qui. Resta solo su questo dispositivo. Senza chiave la corsa la prepara il coach dalle frasi tipiche.</div>`);
+    <div class="list-foot">${geminiKey() ? 'Chiave Gemini collegata: la corsa con l\'AI usa Gemini su tutti i tuoi dispositivi.' : 'Gratis: apri <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent-ink);font-weight:600">aistudio.google.com/apikey</a>, accedi con Google, tocca "Create API key", copiala e incollala qui. Basta farlo una volta: vale su tutti i tuoi dispositivi.'}</div>`);
   if (repoInfo()) out.push(`<div class="list-h">Pulsante aggiorna</div><div class="list">
     <div class="li"><div class="grow">Aggiornamento immediato</div><b>${ghToken() ? 'attivo' : 'non attivo'}</b></div>
     <button class="li" style="width:100%;text-align:left${ghToken() ? ';color:var(--red)' : ''}" data-act="${ghToken() ? 'ghoff' : 'ghon'}">${ic(ghToken() ? 'trash' : 'refresh')}<span class="grow">${ghToken() ? 'Scollega GitHub da questo dispositivo' : 'Attiva l\'aggiornamento immediato'}</span></button></div>
@@ -929,7 +928,14 @@ function viewAccount() {
     <button class="li" style="width:100%;text-align:left;color:var(--red)" data-act="wipe">${ic('trash')}<span class="grow">Cancella piano, check-in e dieta da questo dispositivo</span></button></div>
     <div class="list-foot">Piano, check-in e dieta della web app restano in questo browser e non si mischiano con l'app iPhone. Coach Garmin Web · stima dell'app, non un parere medico.</div>`);
   $('#view').innerHTML = out.join('');
-  $('#gemIn').onchange = e => { store.set(GKEY, e.target.value.trim()); toast(e.target.value.trim() ? 'Chiave Gemini salvata' : 'Chiave Gemini tolta'); };
+  $('#gemIn').onchange = e => {
+    const k = e.target.value.trim();
+    store.set(GKEY, k);
+    if (!k) return toast('Chiave Gemini tolta da questo dispositivo');
+    if (!/^AIza[\w-]{30,}$/.test(k)) return toast('La chiave Gemini di solito inizia con "AIza": ricontrollala.', 5000);
+    // la salva cifrata su GitHub: vale anche sugli altri dispositivi
+    if (repoInfo()) sendAction({ azione: 'gemini', key: k }, 'Salvo la chiave Gemini'); else toast('Chiave Gemini salvata');
+  };
   $('#importIn').onchange = async e => {
     try {
       const j = JSON.parse(await e.target.files[0].text());

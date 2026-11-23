@@ -80,7 +80,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for f in data/token.enc.json data/mywhoosh.enc.json data/mywhoosh-login.enc.json; do if [ -f "$f" ]; then git add "$f"; fi; done
+          for f in data/token.enc.json data/mywhoosh.enc.json data/mywhoosh-login.enc.json data/gemini.enc.json; do if [ -f "$f" ]; then git add "$f"; fi; done
           if ! git diff --cached --quiet; then
             git commit -m "Token aggiornati (cifrati) [skip ci]"
             git push origin HEAD:main

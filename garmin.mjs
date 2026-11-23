@@ -644,6 +644,9 @@ export async function doAction(req) {
       if (!added && !removed) return 'Corse su Garmin già aggiornate.';
       return `Garmin Connect: ${added} ${added === 1 ? 'corsa caricata' : 'corse caricate'}${sent && watch ? ` e inviate al ${watch.name}` : ''}${removed ? `, ${removed} tolte` : ''}.`;
     }
+    case 'gemini':
+      writeEnc(path.join(ROOT, 'data', 'gemini.enc.json'), { key: String(req.key || '').trim() });
+      return 'Chiave Gemini salvata: vale su tutti i tuoi dispositivi.';
     default: throw new Error('Azione sconosciuta.');
   }
 }
@@ -654,7 +657,7 @@ export function loadEsito() { try { return JSON.parse(fs.readFileSync(path.join(
 /** Dati per la web app (senza il token Garmin né campi interni). */
 export function publicData(c) {
   return {
-    mwImport: c.mwLast || null, mwFtp: c.mwFtp || null, cirqa: c.cirqa || null, runWorkouts: c.runWorkouts || {}, mywhoosh: loadMyWhoosh(), mywhooshAuto: myWhooshAuto(), esito: loadEsito(), garminLinked: !!loadTokens(),
+    geminiKey: readEnc(path.join(ROOT, 'data', 'gemini.enc.json'))?.key || null, mwImport: c.mwLast || null, mwFtp: c.mwFtp || null, cirqa: c.cirqa || null, runWorkouts: c.runWorkouts || {}, mywhoosh: loadMyWhoosh(), mywhooshAuto: myWhooshAuto(), esito: loadEsito(), garminLinked: !!loadTokens(),
     updated: c.lastSync || null, error: c.lastSyncError || null, profile: c.profile || null,
     days: Object.values(c.days).sort((a, b) => (a.key < b.key ? -1 : 1)),
     activities: c.activities, devices: c.devices || [], ftp: c.ftp || null,
