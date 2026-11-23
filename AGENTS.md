@@ -19,3 +19,4 @@ Versione web (PWA) dell'app iPhone Coach Garmin (`../Coach Garmin`). Impostazion
 > Regole generali in `~/.studio-locale/AGENTS.md`, preferenze in `~/.studio-locale/progetti/MEMORIA.md`.
 
 - Tutto gira su GitHub Actions (ubuntu), **senza Mac** (scelta di Simone 23-11-2026). Garmin a volte risponde 429 ai server cloud sul passaggio oauth-service: `fetchRetry` riprova dopo 5/15/30 s. Il runner sul Mac è stato provato e tolto.
+- MyWhoosh: il codice dura ~15 giorni e non ha rinnovo. **Scelta di Simone (23-11-2026): email e password MyWhoosh salvate cifrate** con TOKEN_KEY in `data/mywhoosh-login.enc.json`; `renewMyWhoosh()` rifà l'accesso quando mancano meno di 3 giorni. (Per Garmin invece solo il token.)
