@@ -182,7 +182,7 @@ function openLinkGarmin() {
   };
 }
 function openLinkMyWhoosh() {
-  sheet('Collega MyWhoosh', `<section class="card"><div class="sub">Scrivi email e password con cui entri in MyWhoosh. Partono cifrate, vengono usate una volta sola per entrare e <b>non vengono salvate</b>: si conserva solo il codice di accesso, cifrato.</div>
+  sheet('Collega MyWhoosh', `<section class="card"><div class="sub">Scrivi email e password con cui entri in MyWhoosh. Partono cifrate e vengono <b>conservate cifrate</b> (le può leggere solo GitHub) per rinnovare da solo l'accesso, che MyWhoosh fa scadere ogni 15 giorni.</div>
     <div class="form"><div class="field"><input type="text" class="wide" id="mwEmail" placeholder="Email MyWhoosh" autocomplete="username" autocapitalize="off" spellcheck="false" style="max-width:none;width:100%"></div>
     <div class="field"><input type="password" id="mwPass" placeholder="Password MyWhoosh" autocomplete="current-password" style="max-width:none;width:100%;background:var(--fill);border:0;border-radius:8px;padding:6px 10px"></div></div>
     <p id="mwMsg" class="tiny" style="margin:0"></p><div class="tiny">Il collegamento passa da GitHub e richiede 1–2 minuti.</div></section>`,
