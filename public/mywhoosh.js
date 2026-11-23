@@ -1,5 +1,5 @@
 // Allenamenti su MyWhoosh (coaching.mywhoosh.com), come Views/MyWhooshWorkouts.swift dell'app iPhone.
-// Il token arriva cifrato con i dati Garmin (si collega una volta dal Mac con "Collega MyWhoosh.command").
+// Il token arriva cifrato con i dati Garmin (si collega da Account → Collegamenti).
 import * as C from './coach.js';
 
 const API = 'https://coaching.mywhoosh.com/api/v2';
@@ -19,12 +19,12 @@ export function account(data) {
 }
 
 async function req(acc, method, path, body) {
-  if (!acc || acc.expired) throw new Error('MyWhoosh non collegato o accesso scaduto: fai doppio clic su "Collega MyWhoosh.command" sul Mac.');
+  if (!acc || acc.expired) throw new Error('MyWhoosh non collegato o accesso scaduto: collegalo da Account → Collegamenti.');
   const r = await fetch(API + path, {
     method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acc.token },
     body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30e3),
   });
-  if (r.status === 401) throw new Error('Accesso MyWhoosh scaduto: rifai "Collega MyWhoosh.command" sul Mac.');
+  if (r.status === 401) throw new Error('Accesso MyWhoosh scaduto: ricollegalo da Account → Collegamenti.');
   if (!r.ok) throw new Error(`MyWhoosh ha risposto ${r.status}`);
   return r.json().catch(() => ({}));
 }

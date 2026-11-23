@@ -113,17 +113,17 @@ export async function exchangeTicket(ticket) {
 let TOK = null;
 async function refresh() {
   const t = TOK || loadTokens();
-  if (!t?.refreshToken) throw new Error('Garmin non collegato: fai doppio clic su "Collega Garmin.command".');
+  if (!t?.refreshToken) throw new Error('Garmin non collegato: collegalo dalla web app (Account → Collegamenti).');
   const { code, j } = await tokenPost(t.clientId, { grant_type: 'refresh_token', client_id: t.clientId, refresh_token: t.refreshToken });
   const n = code === 200 && parseToken(j, t.clientId, t.refreshToken);
-  if (!n) throw new Error(`Sessione Garmin scaduta (HTTP ${code}): ricollega l'account con "Collega Garmin.command".`);
+  if (!n) throw new Error(`Sessione Garmin scaduta (HTTP ${code}): ricollegalo dalla web app (Account → Collegamenti).`);
   n.displayName = t.displayName; n.fullName = t.fullName;
   TOK = n; saveTokens(n);
   return n;
 }
 async function tokens() {
   TOK = TOK || loadTokens();
-  if (!TOK) throw new Error('Garmin non collegato: fai doppio clic su "Collega Garmin.command".');
+  if (!TOK) throw new Error('Garmin non collegato: collegalo dalla web app (Account → Collegamenti).');
   if (TOK.expiresAt - Date.now() < 300e3) return refresh();
   return TOK;
 }
@@ -339,13 +339,33 @@ export async function sync({ days = 3 } = {}) {
   return c;
 }
 
-/** Token MyWhoosh (cifrato da collega-mywhoosh.mjs): va alla web app dentro i dati cifrati. */
+/** Token MyWhoosh (cifrato): va alla web app dentro i dati cifrati. */
 export const loadMyWhoosh = () => readEnc(path.join(ROOT, 'data', 'mywhoosh.enc.json'));
+
+/** Accesso a MyWhoosh con email e password (non salvate): si conserva solo il token, cifrato. */
+export async function loginMyWhoosh(email, password) {
+  const r = await fetch('https://event.mywhoosh.com/api/auth/login', {
+    method: 'POST', signal: AbortSignal.timeout(30e3),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Origin: 'https://workout.mywhoosh.com', Referer: 'https://workout.mywhoosh.com/' },
+    body: JSON.stringify({ email, password, token: '' }),
+  });
+  const j = await r.json().catch(() => ({}));
+  const token = j?.token || j?.data?.token;
+  if (!r.ok || !token) throw new Error(`MyWhoosh non ha accettato l'accesso (${j?.message || 'HTTP ' + r.status}). Ricontrolla email e password.`);
+  const claim = k => { try { return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())[k]; } catch { return undefined; } };
+  const userId = j?.user?.whoosh_user_id ?? j?.data?.user?.whoosh_user_id ?? claim('userId');
+  const exp = claim('exp') ? claim('exp') * 1000 : null;
+  writeEnc(path.join(ROOT, 'data', 'mywhoosh.enc.json'), { token, userId: userId != null ? String(userId) : null, exp });
+  return { exp };
+}
+
+/** Esito dell'ultimo collegamento chiesto dalla web app (stesso giro di GitHub Actions). */
+export function loadEsito() { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'esito.json'), 'utf8')); } catch { return null; } }
 
 /** Dati per la web app (senza il token Garmin né campi interni). */
 export function publicData(c) {
   return {
-    mywhoosh: loadMyWhoosh(),
+    mywhoosh: loadMyWhoosh(), esito: loadEsito(), garminLinked: !!loadTokens(),
     updated: c.lastSync || null, error: c.lastSyncError || null, profile: c.profile || null,
     days: Object.values(c.days).sort((a, b) => (a.key < b.key ? -1 : 1)),
     activities: c.activities, devices: c.devices || [], ftp: c.ftp || null,

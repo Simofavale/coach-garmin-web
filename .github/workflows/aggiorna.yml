@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
+    inputs:
+      richiesta:
+        description: "Collegamento chiesto dalla web app (cifrato)"
+        required: false
+        default: ""
   push:
     branches: [main]
 
@@ -43,6 +48,15 @@ jobs:
           key: garmin-${{ github.run_id }}
           restore-keys: garmin-
 
+      # collegamento di Garmin o MyWhoosh chiesto dalla web app (testo cifrato: niente in chiaro nel registro)
+      - name: Collega account
+        if: ${{ inputs.richiesta != '' && inputs.richiesta != null }}
+        run: node collega-web.mjs
+        env:
+          RICHIESTA: ${{ inputs.richiesta }}
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+          TOKEN_KEY: ${{ secrets.TOKEN_KEY }}
+
       - name: Scarica da Garmin e genera il sito
         run: node server.mjs --build _site
         env:
@@ -57,15 +71,14 @@ jobs:
           key: garmin-${{ github.run_id }}
 
       # il token rinnovato (cifrato) torna nel repository, così il giro dopo lo trova
-      - name: Salva token rinnovato
+      - name: Salva token
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          [ -f data/token.enc.json ] || exit 0   # Garmin non ancora collegato
-          git add data/token.enc.json
+          for f in data/token.enc.json data/mywhoosh.enc.json; do if [ -f "$f" ]; then git add "$f"; fi; done
           if ! git diff --cached --quiet; then
-            git commit -m "Token Garmin rinnovato [skip ci]"
+            git commit -m "Token aggiornati (cifrati) [skip ci]"
             git push origin HEAD:main
           fi
 

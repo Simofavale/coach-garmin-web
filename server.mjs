@@ -7,7 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { ROOT, sync, publicData, loadCache, encrypt, localKeys, addDays, today } from './garmin.mjs';
+import { ROOT, sync, publicData, loadCache, encrypt, localKeys, addDays, today, loadEsito } from './garmin.mjs';
 
 const PORT = Number(process.env.PORT) || 5174;
 const PUB = path.join(ROOT, 'public');
@@ -63,7 +63,7 @@ if (arg('--build')) {
   fs.cpSync(PUB, out, { recursive: true });
   fs.mkdirSync(path.join(out, 'api'), { recursive: true });
   fs.writeFileSync(path.join(out, 'api/garmin.json'), encrypt(JSON.stringify(publicData(c)), dataKey));
-  fs.writeFileSync(path.join(out, 'api/version.json'), JSON.stringify({ updated: c.lastSync || 0 }));
+  fs.writeFileSync(path.join(out, 'api/version.json'), JSON.stringify({ updated: c.lastSync || 0, esito: loadEsito()?.id || null }));
   fs.writeFileSync(path.join(out, '.nojekyll'), '');
   fs.writeFileSync(path.join(out, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
   console.log(`Sito generato in ${out} (dati cifrati: si aprono solo con il link privato)`);

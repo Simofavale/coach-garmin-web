@@ -117,32 +117,85 @@ async function refreshNow() {
     return;
   }
   if (refreshing) return toast('Sto già aggiornando…');
-  if (!ghToken()) return openGhSetup(() => refreshNow());
   const before = DATA?.updated || 0;
+  runOnGitHub(null, 'Aggiorno da Garmin', v => v.updated > before, async () => { await loadData(); toast('Dati Garmin aggiornati adesso'); }, () => refreshNow());
+}
+/** Avvia il workflow su GitHub (con una richiesta cifrata, se c'è) e aspetta che `done(version)` sia vero. */
+async function runOnGitHub(richiesta, label, done, onDone, retry) {
+  const r = repoInfo();
+  if (!r) return toast('Funziona solo dal sito pubblicato (link privato).');
+  if (!ghToken()) return openGhSetup(retry);
   try {
     const res = await fetch(`https://api.github.com/repos/${r.owner}/${r.repo}/actions/workflows/aggiorna.yml/dispatches`, {
-      method: 'POST', headers: { Authorization: 'Bearer ' + ghToken(), Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'main' }),
+      method: 'POST', headers: { Authorization: 'Bearer ' + ghToken(), Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ref: 'main', ...(richiesta ? { inputs: { richiesta } } : {}) }),
     });
-    if (res.status === 401 || res.status === 403 || res.status === 404) { store.set(GH_KEY, ''); toast('Autorizzazione GitHub non valida: ricollegala', 5000); return openGhSetup(() => refreshNow()); }
+    if (res.status === 401 || res.status === 403 || res.status === 404) { store.set(GH_KEY, ''); toast('Autorizzazione GitHub non valida: ricollegala', 5000); return openGhSetup(retry); }
     if (!res.ok) throw new Error('GitHub ha risposto ' + res.status);
-  } catch (e) { return toast('Non riesco ad avviare l\'aggiornamento: ' + e.message, 5000); }
-  // aspetta i dati nuovi (di solito 1–2 minuti) mostrando il tempo che passa
+  } catch (e) { return toast('Non riesco ad avviare: ' + e.message, 5000); }
+  // aspetta il risultato (di solito 1–2 minuti) mostrando il tempo che passa
   const t0 = Date.now();
   refreshing = setInterval(async () => {
     const sec = Math.round((Date.now() - t0) / 1000);
-    toast(`Aggiorno da Garmin… ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`, 12e3);
+    toast(`${label}… ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`, 12e3);
     setSpin(true);
     let v = null;
     try { v = await (await fetch('api/version.json?t=' + Date.now(), { cache: 'no-store' })).json(); } catch { }
-    if (v && v.updated > before) {
-      clearInterval(refreshing); refreshing = null;
-      await loadData();
-      toast('Dati Garmin aggiornati adesso');
-    } else if (sec > 300) {
-      clearInterval(refreshing); refreshing = null; setSpin(false);
-      toast('Ci sta mettendo più del solito: i dati arriveranno da soli fra poco.', 5000);
-    }
+    if (v && done(v)) { clearInterval(refreshing); refreshing = null; await onDone(); }
+    else if (sec > 300) { clearInterval(refreshing); refreshing = null; setSpin(false); toast('Ci sta mettendo più del solito: il risultato arriverà da solo fra poco.', 5000); }
   }, 6000);
+}
+/** Cifra la richiesta con la chiave del link privato: solo GitHub (che ha la stessa chiave segreta) la può leggere. */
+async function encryptRequest(obj) {
+  const k = getKey(); if (!k) throw new Error('Apri la web app dal link privato.');
+  const key = await crypto.subtle.importKey('raw', b64(k.replace(/-/g, '+').replace(/_/g, '/') + '='), 'AES-GCM', false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj))));
+  const enc64 = u => btoa(String.fromCharCode(...u));
+  return JSON.stringify({ enc: 1, gz: 0, iv: enc64(iv), data: enc64(data) });
+}
+async function sendLink(obj, label) {
+  if (refreshing) return toast('Aspetta: c\'è già un\'operazione in corso.');
+  const id = Math.random().toString(36).slice(2, 10);
+  let richiesta;
+  try { richiesta = await encryptRequest({ ...obj, id, at: Date.now() }); } catch (e) { return toast(e.message, 5000); }
+  closeSheet();
+  runOnGitHub(richiesta, label, v => v.esito === id, async () => {
+    await loadData();
+    const e = DATA.esito;
+    if (e?.ok) { toast(e.msg, 6000); if (obj.tipo === 'mywhoosh') { MWLIST = null; loadMyWhoosh(); } }
+    else sheet('Collegamento non riuscito', `<div class="banner">${esc(e?.msg || 'Errore sconosciuto.')}</div><button class="btn" data-act="${obj.tipo === 'garmin' ? 'linkgarmin' : 'linkmw'}">Riprova</button>`);
+  }, () => sendLink(obj, label));
+}
+const GARMIN_SIGNIN = 'https://sso.garmin.com/mobile/sso/en_US/sign-in?clientId=GCM_IOS_DARK&service=' + encodeURIComponent('https://mobile.integration.garmin.com/gcm/ios');
+function openLinkGarmin() {
+  sheet('Collega Garmin', `<section class="card"><div class="sub" style="display:flex;flex-direction:column;gap:8px">
+    <p style="margin:0"><b>1.</b> Tocca il pulsante e accedi con email e password Garmin. La password la vede solo Garmin.</p></div>
+    <a class="btn" href="${GARMIN_SIGNIN}" target="_blank" rel="noopener">Apri la pagina di accesso Garmin</a>
+    <div class="sub" style="display:flex;flex-direction:column;gap:8px">
+    <p style="margin:0"><b>2.</b> Dopo l'accesso si apre una pagina "mobile.integration.garmin.com" (può essere bianca o dare errore: va bene). Copia il suo <b>indirizzo completo</b> dalla barra in alto (contiene "ticket=ST-…").</p>
+    <p style="margin:0"><b>3.</b> Torna qui, incollalo e tocca Collega. Fallo subito: il codice vale pochi minuti.</p></div>
+    <input type="text" id="ticketIn" placeholder="Incolla qui l'indirizzo con ticket=ST-…" autocapitalize="off" autocorrect="off" spellcheck="false" style="border:1.5px solid var(--line);border-radius:12px;padding:12px;background:var(--bg)">
+    <p id="ticketMsg" class="tiny" style="margin:0"></p>
+    <div class="tiny">Se sull'iPhone si apre l'app Garmin Connect invece della pagina, fai questo passaggio dal browser del Mac. Il collegamento passa da GitHub, cifrato, e richiede 1–2 minuti.</div></section>`,
+  { right: 'Collega', left: 'Annulla' });
+  sheet.ok = () => {
+    const v = $('#ticketIn').value.trim(), ticket = v.match(/ST-[\w.-]+/)?.[0];
+    if (!ticket) { $('#ticketMsg').textContent = 'Non trovo "ticket=ST-…" in quello che hai incollato.'; return; }
+    sendLink({ tipo: 'garmin', ticket }, 'Collego Garmin');
+  };
+}
+function openLinkMyWhoosh() {
+  sheet('Collega MyWhoosh', `<section class="card"><div class="sub">Scrivi email e password con cui entri in MyWhoosh. Partono cifrate, vengono usate una volta sola per entrare e <b>non vengono salvate</b>: si conserva solo il codice di accesso, cifrato.</div>
+    <div class="form"><div class="field"><input type="text" class="wide" id="mwEmail" placeholder="Email MyWhoosh" autocomplete="username" autocapitalize="off" spellcheck="false" style="max-width:none;width:100%"></div>
+    <div class="field"><input type="password" id="mwPass" placeholder="Password MyWhoosh" autocomplete="current-password" style="max-width:none;width:100%;background:var(--fill);border:0;border-radius:8px;padding:6px 10px"></div></div>
+    <p id="mwMsg" class="tiny" style="margin:0"></p><div class="tiny">Il collegamento passa da GitHub e richiede 1–2 minuti.</div></section>`,
+  { right: 'Collega', left: 'Annulla' });
+  sheet.ok = () => {
+    const email = $('#mwEmail').value.trim(), password = $('#mwPass').value;
+    if (!/@/.test(email) || !password) { $('#mwMsg').textContent = 'Scrivi email e password.'; return; }
+    sendLink({ tipo: 'mywhoosh', email, password }, 'Collego MyWhoosh');
+  };
 }
 function openGhSetup(onDone) {
   const r = repoInfo();
@@ -231,7 +284,7 @@ function viewToday() {
   const k = C.today();
   setHead(C.pretty(k, 'long'), refreshBtn);
   if (!DATA.days.length) {
-    $('#view').innerHTML = `<div class="empty">${ic('warning')}<h3>Garmin non ancora collegato</h3><p>${esc(DATA.error || 'Nessun dato Garmin.')}</p><p class="tiny">Sul Mac: doppio clic su "Collega Garmin.command" nella cartella Coach Garmin Web. Dopo 2–3 minuti qui compaiono i tuoi dati.</p></div>`;
+    $('#view').innerHTML = `<div class="empty">${ic('warning')}<h3>Garmin non ancora collegato</h3><p>Collega il tuo account Garmin: lo fai da qui in un minuto.</p><button class="btn" style="max-width:320px" data-act="linkgarmin">${ic('pulse')}Collega Garmin</button></div>`;
     return;
   }
   const days = DATA.days, t = days.find(d => d.key === k) || days[days.length - 1];
@@ -524,6 +577,10 @@ function viewActivities() {
 function viewAccount() {
   setHead('Account', refreshBtn);
   const out = [], days = DATA.days;
+  out.push(`<div class="list-h">Collegamenti</div><div class="list">
+    <button class="li" style="width:100%;text-align:left" data-act="linkgarmin"><div class="ico-c" style="background:#007cc3">${ic('pulse')}</div><div class="grow"><div class="ttl">Garmin Connect</div><div class="sub">${DATA.garminLinked ? 'Collegato' + (DATA.error ? ' · ' + esc(DATA.error) : '') : 'Non collegato'}</div></div><span class="chip">${DATA.garminLinked ? 'Ricollega' : 'Collega'}</span></button>
+    <button class="li" style="width:100%;text-align:left" data-act="linkmw"><div class="ico-c" style="background:#af52de">${ic('bicycle')}</div><div class="grow"><div class="ttl">MyWhoosh</div><div class="sub">${MW.account(DATA) ? (MW.account(DATA).expired ? 'Accesso scaduto' : 'Collegato') : 'Non collegato'}</div></div><span class="chip">${MW.account(DATA) && !MW.account(DATA).expired ? 'Ricollega' : 'Collega'}</span></button></div>
+    <div class="list-foot">${ghToken() || !repoInfo() ? '' : 'Al primo collegamento ti chiedo l\'autorizzazione GitHub (la stessa del pulsante ↻). '}Garmin e MyWhoosh non accettano richieste da una pagina web: il collegamento lo fa GitHub per te, con i dati cifrati.</div>`);
   out.push(`<div class="list-h">Garmin Connect</div><div class="list">
     <div class="li"><div class="grow">Account</div><b>${esc(DATA.profile?.name || 'collegato')}</b></div>
     <div class="li"><div class="grow">Ultimo aggiornamento</div><b>${DATA.updated ? `${ago(DATA.updated)} (${hhmm(DATA.updated)})` : '–'}</b></div>
@@ -541,7 +598,7 @@ function viewAccount() {
     <div class="li"><div class="grow">Allenamenti MyWhoosh</div><b>${acc ? (acc.expired ? 'accesso scaduto' : 'collegati') : 'non collegati'}</b></div>
     ${acc && !acc.expired ? `<div class="li"><div class="grow">Salvati su MyWhoosh</div><b>${MWLIST ? MWLIST.length : '…'}</b></div>
     <button class="li" style="width:100%;text-align:left" data-act="mwlib">${ic('bicycle')}<span class="grow">${MWLIST && MW.LIBRARY.every(w => MWLIST.some(x => x.name === w.code + ' ' + w.name)) ? 'W01–W09 sono già tutti su MyWhoosh' : 'Carica su MyWhoosh gli W01–W09 mancanti'}</span></button>` : ''}</div>
-    <div class="list-foot">${acc ? (acc.exp ? `Accesso valido fino al ${new Date(acc.exp).toLocaleDateString('it-IT')}. ` : '') + 'Nei giorni di rulli la web app ti dice quale allenamento usare e, se serve, ne carica uno su misura (in MyWhoosh: Allenamenti › I miei allenamenti).' : 'Per collegarli: sul Mac doppio clic su "Collega MyWhoosh.command" (una volta sola).'}${MWSTATE ? ' ' + esc(MWSTATE) : ''}</div>`);
+    <div class="list-foot">${acc ? (acc.exp ? `Accesso valido fino al ${new Date(acc.exp).toLocaleDateString('it-IT')}. ` : '') + 'Nei giorni di rulli la web app ti dice quale allenamento usare e, se serve, ne carica uno su misura (in MyWhoosh: Allenamenti › I miei allenamenti).' : 'Collegali da "Collegamenti" qui sopra.'}${MWSTATE ? ' ' + esc(MWSTATE) : ''}</div>`);
   out.push(`<div class="list-h">Corsa con l'AI (Gemini)</div><div class="list">
     <div class="li"><div class="grow">Chiave Gemini</div><input type="password" id="gemIn" placeholder="incolla la chiave" value="${esc(geminiKey())}" autocomplete="off" style="width:160px;background:var(--fill);border:0;border-radius:8px;padding:6px 10px"></div></div>
     <div class="list-foot">Gratis: crea la chiave su <b>aistudio.google.com/apikey</b> (account Google, "Create API key") e incollala qui. Resta solo su questo dispositivo. Senza chiave la corsa la prepara il coach dalle frasi tipiche.</div>`);
@@ -645,8 +702,8 @@ async function loadMyWhoosh() {
 }
 function myWhooshCard(w, steps, adj) {
   const acc = MW.account(DATA);
-  if (!acc) return card('Su MyWhoosh oggi', 'bicycle', `<div class="sub">${w.code === 'PIANO' || adj ? 'Crea su MyWhoosh un allenamento con i blocchi qui sopra' : `Su MyWhoosh avvia "${esc(w.code + ' ' + w.name)}"`}. Per farlo caricare in automatico collega MyWhoosh: sul Mac doppio clic su "Collega MyWhoosh.command".</div>`);
-  if (acc.expired) return card('Su MyWhoosh oggi', 'bicycle', '<div class="banner">Accesso MyWhoosh scaduto: rifai "Collega MyWhoosh.command" sul Mac.</div>');
+  if (!acc) return card('Su MyWhoosh oggi', 'bicycle', `<div class="sub">${w.code === 'PIANO' || adj ? 'Crea su MyWhoosh un allenamento con i blocchi qui sopra' : `Su MyWhoosh avvia "${esc(w.code + ' ' + w.name)}"`}. </div><button class="btn soft" data-act="linkmw">${ic('bicycle')}Collega MyWhoosh per caricarlo da qui</button>`);
+  if (acc.expired) return card('Su MyWhoosh oggi', 'bicycle', `<div class="banner">Accesso MyWhoosh scaduto.</div><button class="btn soft" data-act="linkmw">Ricollega MyWhoosh</button>`);
   if (!MWLIST) return card('Su MyWhoosh oggi', 'bicycle', `<div class="sub">${MWSTATE ? esc(MWSTATE) : 'Leggo i tuoi allenamenti MyWhoosh…'}</div>`);
   const sug = MW.suggestion(w, steps, MWLIST);
   if (sug.kind === 'saved') return card('Su MyWhoosh oggi', 'bicycle', `<div class="strong" style="color:var(--accent-ink)">${ic('checkmark-circle')} Usa un allenamento già salvato</div><div class="headline">${esc(sug.name)}</div><div class="tiny">${sug.minutes} min · fino al ${Math.round(sug.peak * 100)}% FTP · in MyWhoosh: Allenamenti › I miei allenamenti</div>`);
@@ -718,6 +775,8 @@ document.addEventListener('click', async e => {
   if (a === 'sheet-ok') return sheet.ok && sheet.ok();
   if (a === 'reload') return location.reload();
   if (a === 'refresh') return refreshNow();
+  if (a === 'linkgarmin') return openLinkGarmin();
+  if (a === 'linkmw') return openLinkMyWhoosh();
   if (a === 'ghon') return openGhSetup(() => { route(); refreshNow(); });
   if (a === 'ghoff') { store.set(GH_KEY, ''); route(); return toast('GitHub scollegato da questo dispositivo'); }
   if (a === 'checkin') return openCheckIn();
