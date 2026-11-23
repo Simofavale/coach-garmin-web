@@ -4,8 +4,9 @@
 // o non risponde, il coach costruisce la corsa dalle frasi tipiche (RunNotePlanner).
 import * as C from './coach.js';
 
-const MODEL = 'gemini-flash-latest';
-const URL_API = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+// se un modello è occupato (503) o al limite (429) si passa al successivo, tutti del livello gratuito
+const MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest'];
+const urlFor = m => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 export const SUGGESTIONS = ['Corro con mia moglie 45 minuti, alterniamo corsa e camminata', 'Ho mezz\'ora, gambe un po\' pesanti', 'Mi sento bene, ho un\'ora', 'Corsa facile 40 minuti da solo'];
 
 const INSTRUCTIONS = `Sei il coach di corsa dentro l'app Coach Garmin. Programmi la corsa di oggi per un amatore che alterna corsa e rulli \
@@ -86,26 +87,31 @@ export function sanitize(r, max) {
 
 export async function gemini(key, note, ctx, max) {
   const prompt = `RICHIESTA DI OGGI (la cosa più importante, rispettala): ${note}\n\nDurata massima: ${max} minuti.\nDati di contesto:\n${ctx}`;
-  const r = await fetch(URL_API, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema: SCHEMA, temperature: 0.4 },
-    }),
-    signal: AbortSignal.timeout(45e3),
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', responseSchema: SCHEMA, temperature: 0.4 },
   });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const msg = j?.error?.message || `HTTP ${r.status}`;
-    if (r.status === 400 && /api key/i.test(msg)) throw new Error('La chiave Gemini non è valida: ricontrollala in Account.');
-    if (r.status === 429) throw new Error('Gemini: limite gratuito raggiunto per ora, riprova più tardi.');
-    throw new Error('Gemini non ha risposto: ' + msg);
+  let last = '';
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let r;
+      try { r = await fetch(urlFor(model), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body, signal: AbortSignal.timeout(45e3) }); }
+      catch (e) { last = e.message; continue; }
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        const txt = j?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+        try { const out = sanitize(JSON.parse(txt), max); if (out.steps.length) { out.modelName = model; return out; } } catch { }
+        last = 'risposta non valida'; continue;
+      }
+      const msg = j?.error?.message || `HTTP ${r.status}`;
+      if (r.status === 400 && /api key/i.test(msg)) throw new Error('La chiave Gemini non è valida: ricontrollala in Account.');
+      last = msg;
+      if (r.status === 503 || r.status === 500) { await new Promise(x => setTimeout(x, 1500)); continue; }   // occupato: riprova, poi modello dopo
+      break;   // 429 o altro: passa al modello successivo
+    }
   }
-  const txt = j?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-  const out = sanitize(JSON.parse(txt), max);
-  if (!out.steps.length) throw new Error('Gemini non ha proposto tratti: riprova con una frase diversa.');
-  return out;
+  throw new Error('Gemini è molto occupato in questo momento (' + last.slice(0, 80) + ').');
 }
 
 // ---------- il coach sulle tue parole (senza AI) ----------
