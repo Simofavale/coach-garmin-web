@@ -61,6 +61,12 @@ if (arg('--build')) {
   if (!dataKey) { console.error('Manca DATA_KEY: i dati non verrebbero cifrati. Build annullata.'); process.exit(1); }
   fs.rmSync(out, { recursive: true, force: true });
   fs.cpSync(PUB, out, { recursive: true });
+  // numero di versione su codice e stile: GitHub Pages tiene i file in copia 10 minuti, così ogni pubblicazione si vede subito
+  const v = Date.now().toString(36);
+  for (const f of fs.readdirSync(out).filter(f => /\.(js|html)$/.test(f) && f !== 'sw.js')) {
+    const file = path.join(out, f);
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/((?:src|href)="|from '|import\(')(\.\/)?([\w-]+\.(?:js|css))(?=['"])/g, (m, a, dot, name) => `${a}${dot || ''}${name}?v=${v}`));
+  }
   fs.mkdirSync(path.join(out, 'api'), { recursive: true });
   fs.writeFileSync(path.join(out, 'api/garmin.json'), encrypt(JSON.stringify(publicData(c)), dataKey));
   fs.writeFileSync(path.join(out, 'api/version.json'), JSON.stringify({ updated: c.lastSync || 0, esito: loadEsito()?.id || null }));
