@@ -167,13 +167,13 @@ async function sendLink(obj, label) {
     else sheet('Collegamento non riuscito', `<div class="banner">${esc(e?.msg || 'Errore sconosciuto.')}</div><button class="btn" data-act="${obj.tipo === 'garmin' ? 'linkgarmin' : 'linkmw'}">Riprova</button>`);
   }, () => sendLink(obj, label));
 }
-const GARMIN_SIGNIN = 'https://sso.garmin.com/mobile/sso/en_US/sign-in?clientId=GCM_IOS_DARK&service=' + encodeURIComponent('https://mobile.integration.garmin.com/gcm/ios');
+const GARMIN_SIGNIN = 'https://sso.garmin.com/sso/login?service=' + encodeURIComponent('https://sso.garmin.com/sso/embed');
 function openLinkGarmin() {
   sheet('Collega Garmin', `<section class="card"><div class="sub" style="display:flex;flex-direction:column;gap:8px">
     <p style="margin:0"><b>1.</b> Tocca il pulsante e accedi con email e password Garmin. La password la vede solo Garmin.</p></div>
     <button class="btn" data-act="garminsignin">Apri la pagina di accesso Garmin</button>
     <div class="sub" style="display:flex;flex-direction:column;gap:8px">
-    <p style="margin:0"><b>2.</b> Dopo l'accesso si apre una pagina "mobile.integration.garmin.com" (può essere bianca o dare errore: va bene). Copia il suo <b>indirizzo completo</b> dalla barra in alto (contiene "ticket=ST-…").</p>
+    <p style="margin:0"><b>2.</b> Dopo l'accesso si apre una pagina quasi vuota "sso.garmin.com/sso/embed". Copia il suo <b>indirizzo completo</b> dalla barra in alto (contiene "ticket=ST-…").</p>
     <p style="margin:0"><b>3.</b> Torna qui, incollalo e tocca Collega. Fallo subito: il codice vale pochi minuti.</p></div>
     <input type="text" id="ticketIn" placeholder="Incolla qui l'indirizzo con ticket=ST-…" autocapitalize="off" autocorrect="off" spellcheck="false" style="border:1.5px solid var(--line);border-radius:12px;padding:12px;background:var(--bg)">
     <p id="ticketMsg" class="tiny" style="margin:0"></p>
@@ -182,7 +182,7 @@ function openLinkGarmin() {
   sheet.ok = () => {
     const v = $('#ticketIn').value.trim(), ticket = v.match(/ST-[\w.-]+/)?.[0];
     if (!ticket) { $('#ticketMsg').textContent = 'Non trovo "ticket=ST-…" in quello che hai incollato.'; return; }
-    sendLink({ tipo: 'garmin', ticket }, 'Collego Garmin');
+    sendLink({ tipo: 'garmin', ticket, service: /sso\/embed/.test(v) ? 'embed' : 'mobile' }, 'Collego Garmin');
   };
 }
 function openLinkMyWhoosh() {

@@ -22,7 +22,7 @@ try {
   if (req.tipo === 'garmin') {
     const ticket = String(req.ticket || '').match(/ST-[\w.-]+/)?.[0];
     if (!ticket) throw new Error('Nel testo incollato non trovo il codice "ticket=ST-…".');
-    await exchangeTicket(ticket);
+    await exchangeTicket(ticket, /sso\/embed/.test(String(req.ticket)) || req.service === 'embed' ? 'embed' : 'mobile');
     out({ id: req.id, tipo: 'garmin', ok: true, msg: 'Garmin collegato: i tuoi dati arrivano adesso.' });
   } else if (req.tipo === 'mywhoosh') {
     const { exp } = await loginMyWhoosh(String(req.email || '').trim(), String(req.password || ''));

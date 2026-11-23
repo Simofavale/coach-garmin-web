@@ -98,7 +98,42 @@ function parseToken(j, clientId, fallbackRefresh) {
 }
 
 /** Ticket di accesso (ST-…) → token. */
-export async function exchangeTicket(ticket) {
+// ---------- accesso "classico" (sso/embed) come la libreria garth ----------
+// ticket del servizio https://sso.garmin.com/sso/embed → token OAuth1 (dura ~1 anno) → token OAuth2 rinnovabile.
+const EMBED = 'https://sso.garmin.com/sso/embed';
+let CONSUMER = null;
+async function consumer() {
+  if (CONSUMER) return CONSUMER;
+  const r = await fetch('https://thegarth.s3.amazonaws.com/oauth_consumer.json', { signal: AbortSignal.timeout(20e3) });
+  CONSUMER = await r.json();
+  return CONSUMER;
+}
+const pct = v => encodeURIComponent(v).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+async function oauth1(method, url, token, secret) {
+  const c = await consumer(), u = new URL(url);
+  const o = { oauth_consumer_key: c.consumer_key, oauth_nonce: crypto.randomBytes(16).toString('hex'), oauth_signature_method: 'HMAC-SHA1', oauth_timestamp: String(Math.floor(Date.now() / 1000)), oauth_version: '1.0', ...(token ? { oauth_token: token } : {}) };
+  const params = [...u.searchParams.entries(), ...Object.entries(o)].map(([k, v]) => [pct(k), pct(v)]).sort((a, b) => (a[0] === b[0] ? (a[1] < b[1] ? -1 : 1) : a[0] < b[0] ? -1 : 1));
+  const base = [method, pct(u.origin + u.pathname), pct(params.map(p => p.join('=')).join('&'))].join('&');
+  o.oauth_signature = crypto.createHmac('sha1', `${pct(c.consumer_secret)}&${pct(secret || '')}`).update(base).digest('base64');
+  const r = await fetch(u, { method, signal: AbortSignal.timeout(30e3), headers: { 'User-Agent': 'com.garmin.android.apps.connectmobile', Authorization: 'OAuth ' + Object.entries(o).map(([k, v]) => `${pct(k)}="${pct(v)}"`).join(', '), ...(method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) } });
+  return { code: r.status, text: await r.text() };
+}
+async function exchangeOAuth1(t) {
+  const { code, text } = await oauth1('POST', 'https://connectapi.garmin.com/oauth-service/oauth/exchange/user/2.0', t.oauth1Token, t.oauth1Secret);
+  let j = null; try { j = JSON.parse(text); } catch { }
+  if (code !== 200 || !j?.access_token) throw new Error(`Sessione Garmin scaduta (HTTP ${code}): ricollegalo dalla web app (Account → Collegamenti).`);
+  return { ...t, kind: 'oauth1', accessToken: j.access_token, expiresAt: Date.now() + (Number(j.expires_in) || 3600) * 1000 };
+}
+async function exchangeEmbedTicket(ticket) {
+  const { code, text } = await oauth1('GET', `https://connectapi.garmin.com/oauth-service/oauth/preauthorized?ticket=${ticket}&login-url=${EMBED}&accepts-mfa-tokens=true`);
+  const q = new URLSearchParams(text);
+  if (code !== 200 || !q.get('oauth_token')) throw new Error(`Accesso Garmin non completato (HTTP ${code}).`);
+  const t = await exchangeOAuth1({ oauth1Token: q.get('oauth_token'), oauth1Secret: q.get('oauth_token_secret') });
+  saveTokens(t); return t;
+}
+
+export async function exchangeTicket(ticket, service = 'mobile') {
+  if (service === 'embed') return exchangeEmbedTicket(ticket);
   let last = 'nessuna risposta';
   for (const clientId of CLIENT_IDS) {
     const { code, j } = await tokenPost(clientId, { client_id: clientId, service_ticket: ticket, grant_type: GRANT_TICKET, service_url: SERVICE_URL });
@@ -113,6 +148,7 @@ export async function exchangeTicket(ticket) {
 let TOK = null;
 async function refresh() {
   const t = TOK || loadTokens();
+  if (t?.kind === 'oauth1') { const n = await exchangeOAuth1(t); TOK = n; saveTokens(n); return n; }
   if (!t?.refreshToken) throw new Error('Garmin non collegato: collegalo dalla web app (Account → Collegamenti).');
   const { code, j } = await tokenPost(t.clientId, { grant_type: 'refresh_token', client_id: t.clientId, refresh_token: t.refreshToken });
   const n = code === 200 && parseToken(j, t.clientId, t.refreshToken);
