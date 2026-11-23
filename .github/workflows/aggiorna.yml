@@ -37,8 +37,11 @@ jobs:
         with:
           ref: main
 
-      - name: Controlla Node sul Mac
-        run: node --version
+      # il servizio del runner parte con un PATH minimo: aggiunge Homebrew (Node) 
+      - name: Node sul Mac
+        run: |
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          /opt/homebrew/bin/node --version
 
       # storico Garmin (cifrato) tra un giro e l'altro: si scaricano solo i giorni nuovi
       - name: Ripristina storico
