@@ -1,7 +1,7 @@
 # Coach Garmin Web
 
 La versione web dell'app iPhone **Coach Garmin**: si apre da Safari (o dalla schermata Home dell'iPhone) senza installare nulla e senza il limite degli App ID.
-Stessa impostazione di **Rassegna**: sito su GitHub Pages, dati cifrati che si aprono solo con il **link privato**, aggiornamento automatico circa ogni 15 minuti, eseguito **dal Mac** (Garmin blocca i server di GitHub): con il Mac spento o in stop i dati restano all'ultimo aggiornamento e ripartono alla riaccensione.
+Stessa impostazione di **Rassegna**: sito su GitHub Pages, dati cifrati che si aprono solo con il **link privato**, aggiornamento automatico con GitHub Actions circa ogni 15 minuti, anche con il Mac spento.
 
 ## Cosa c'è
 - **Corsa con l'AI (Gemini, gratis)**: in Oggi tocchi "Oggi corro: programma con l'AI", scrivi come stai e con chi corri ("corro con mia moglie 45 minuti, alterniamo corsa e camminata"). Gemini parte dalla seduta del piano (o del programma base W01–W10) e dai dati di stanotte e prepara la corsa **a tempo**. Senza chiave Gemini la prepara il coach dalle frasi tipiche.

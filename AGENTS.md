@@ -18,4 +18,4 @@ Versione web (PWA) dell'app iPhone Coach Garmin (`../Coach Garmin`). Impostazion
 
 > Regole generali in `~/.studio-locale/AGENTS.md`, preferenze in `~/.studio-locale/progetti/MEMORIA.md`.
 
-- **Il lavoro con Garmin gira sul Mac** (23-11-2026): Garmin rispondeva HTTP 429 ai server di GitHub. Runner self-hosted "mac-simone" (etichetta `coach-mac`) in `~/.coach-garmin-runner` (percorso senza spazi: con gli spazi i passi non partono), servizio launchd `actions.runner.Simofavale-coach-garmin-web.mac-simone` (parte all'accensione). Job `build` sul Mac, `pagine`/`deploy`/`prossimo` su ubuntu. Repo con approvazione obbligatoria per i contributi esterni. Il Mac deve essere acceso e sveglio.
+- Tutto gira su GitHub Actions (ubuntu), **senza Mac** (scelta di Simone 23-11-2026). Garmin a volte risponde 429 ai server cloud sul passaggio oauth-service: `fetchRetry` riprova dopo 5/15/30 s. Il runner sul Mac è stato provato e tolto.

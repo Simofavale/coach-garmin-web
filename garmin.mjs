@@ -109,13 +109,23 @@ async function consumer() {
   return CONSUMER;
 }
 const pct = v => encodeURIComponent(v).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+/** Garmin a volte risponde 429 (troppe richieste) ai server cloud: riprova dopo 5, 15 e 30 secondi. */
+async function fetchRetry(u, opts) {
+  let r;
+  for (const wait of [0, 5e3, 15e3, 30e3]) {
+    if (wait) { console.log(`  Garmin: troppe richieste, riprovo fra ${wait / 1000} s`); await new Promise(x => setTimeout(x, wait)); }
+    r = await fetch(u, { ...opts, signal: AbortSignal.timeout(30e3) });
+    if (r.status !== 429) return r;
+  }
+  return r;
+}
 async function oauth1(method, url, token, secret) {
   const c = await consumer(), u = new URL(url);
   const o = { oauth_consumer_key: c.consumer_key, oauth_nonce: crypto.randomBytes(16).toString('hex'), oauth_signature_method: 'HMAC-SHA1', oauth_timestamp: String(Math.floor(Date.now() / 1000)), oauth_version: '1.0', ...(token ? { oauth_token: token } : {}) };
   const params = [...u.searchParams.entries(), ...Object.entries(o)].map(([k, v]) => [pct(k), pct(v)]).sort((a, b) => (a[0] === b[0] ? (a[1] < b[1] ? -1 : 1) : a[0] < b[0] ? -1 : 1));
   const base = [method, pct(u.origin + u.pathname), pct(params.map(p => p.join('=')).join('&'))].join('&');
   o.oauth_signature = crypto.createHmac('sha1', `${pct(c.consumer_secret)}&${pct(secret || '')}`).update(base).digest('base64');
-  const r = await fetch(u, { method, signal: AbortSignal.timeout(30e3), headers: { 'User-Agent': 'com.garmin.android.apps.connectmobile', Authorization: 'OAuth ' + Object.entries(o).map(([k, v]) => `${pct(k)}="${pct(v)}"`).join(', '), ...(method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) } });
+  const r = await fetchRetry(u, { method, signal: AbortSignal.timeout(30e3), headers: { 'User-Agent': 'com.garmin.android.apps.connectmobile', Authorization: 'OAuth ' + Object.entries(o).map(([k, v]) => `${pct(k)}="${pct(v)}"`).join(', '), ...(method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) } });
   return { code: r.status, text: await r.text() };
 }
 async function exchangeOAuth1(t) {
@@ -127,6 +137,7 @@ async function exchangeOAuth1(t) {
 async function exchangeEmbedTicket(ticket) {
   const { code, text } = await oauth1('GET', `https://connectapi.garmin.com/oauth-service/oauth/preauthorized?ticket=${ticket}&login-url=${EMBED}&accepts-mfa-tokens=true`);
   const q = new URLSearchParams(text);
+  if (code === 429) throw new Error('Garmin ha accettato email e password ma sta limitando le richieste: riprova fra 15–30 minuti.');
   if (code !== 200 || !q.get('oauth_token')) throw new Error(`Accesso Garmin non completato (HTTP ${code}).`);
   const t = await exchangeOAuth1({ oauth1Token: q.get('oauth_token'), oauth1Secret: q.get('oauth_token_secret') });
   saveTokens(t); return t;

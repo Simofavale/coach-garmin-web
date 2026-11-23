@@ -22,8 +22,7 @@ permissions:
 
 jobs:
   build:
-    # gira sul Mac di Simone (runner "mac-simone"): Garmin blocca le richieste dai server di GitHub (HTTP 429)
-    runs-on: [self-hosted, coach-mac]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     # un solo giro alla volta: i giri usano e rinnovano lo stesso token Garmin
     concurrency:
@@ -37,11 +36,9 @@ jobs:
         with:
           ref: main
 
-      # il servizio del runner parte con un PATH minimo: aggiunge Homebrew (Node) 
-      - name: Node sul Mac
-        run: |
-          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
-          /opt/homebrew/bin/node --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       # storico Garmin (cifrato) tra un giro e l'altro: si scaricano solo i giorni nuovi
       - name: Ripristina storico
@@ -85,7 +82,7 @@ jobs:
             git push origin HEAD:main
           fi
 
-      # il sito pronto passa ai server di GitHub, che lo impacchettano per Pages (sul Mac manca gtar)
+      # il sito pronto passa al job che lo pubblica su Pages
       - uses: actions/upload-artifact@v4
         with:
           name: sito
