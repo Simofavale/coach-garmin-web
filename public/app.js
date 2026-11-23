@@ -95,7 +95,9 @@ async function loadData({ quiet = false } = {}) {
       const msg = C.updateProgression(U.goal, DATA.days, DATA.activities, U.checkIns);
       if (msg) { saveU(); toast(msg, 5000); }
     }
-    if (changed || !quiet) route();
+    // non ridisegna mentre stai scrivendo in un campo (altrimenti quello che incolli sparisce)
+    const typing = document.activeElement?.matches?.('#view input, #view textarea');
+    if ((changed || !quiet) && !typing) route();
     if (MW.account(DATA) && !MWLIST) loadMyWhoosh();
   } catch (e) {
     if (e instanceof Locked) return showLocked();
@@ -928,6 +930,7 @@ function viewAccount() {
     <button class="li" style="width:100%;text-align:left;color:var(--red)" data-act="wipe">${ic('trash')}<span class="grow">Cancella piano, check-in e dieta da questo dispositivo</span></button></div>
     <div class="list-foot">Piano, check-in e dieta della web app restano in questo browser e non si mischiano con l'app iPhone. Coach Garmin Web · stima dell'app, non un parere medico.</div>`);
   $('#view').innerHTML = out.join('');
+  $('#gemIn').oninput = e => { if (/^AIza[\w-]{30,}$/.test(e.target.value.trim())) e.target.blur(); };
   $('#gemIn').onchange = e => {
     const k = e.target.value.trim();
     store.set(GKEY, k);
