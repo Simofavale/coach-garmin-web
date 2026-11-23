@@ -1,0 +1,107 @@
+name: Aggiorna dati Garmin
+
+on:
+  # Come Rassegna: l'orario programmato di GitHub è inaffidabile, resta solo come riserva.
+  # Il ritmo vero lo dà il job "prossimo", che a fine giro riavvia questo workflow (~ogni 15 minuti).
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # un solo giro alla volta: i giri usano e rinnovano lo stesso token Garmin
+    concurrency:
+      group: coach-build
+      cancel-in-progress: false
+    env:
+      TZ: Europe/Rome
+    steps:
+      # sempre l'ultima versione di main: contiene il token Garmin più recente
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # storico Garmin (cifrato) tra un giro e l'altro: si scaricano solo i giorni nuovi
+      - name: Ripristina storico
+        uses: actions/cache/restore@v4
+        with:
+          path: data/garmin-cache.enc.json
+          key: garmin-${{ github.run_id }}
+          restore-keys: garmin-
+
+      - name: Scarica da Garmin e genera il sito
+        run: node server.mjs --build _site
+        env:
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+          TOKEN_KEY: ${{ secrets.TOKEN_KEY }}
+
+      - name: Salva storico
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/garmin-cache.enc.json
+          key: garmin-${{ github.run_id }}
+
+      # il token rinnovato (cifrato) torna nel repository, così il giro dopo lo trova
+      - name: Salva token rinnovato
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/token.enc.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Token Garmin rinnovato [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: coach-deploy
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  # Catena: aspetta ~13 minuti e fa partire il prossimo aggiornamento (anche se questo giro è fallito).
+  # Se nel frattempo è partito un giro più recente, lascia proseguire quello.
+  prossimo:
+    needs: [build, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Attendi
+        run: sleep 780
+      - name: Avvia il prossimo aggiornamento
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ME: ${{ github.run_id }}
+        run: |
+          piu_recenti=$(gh run list --repo "$REPO" --workflow aggiorna.yml --limit 20 --json databaseId \
+            --jq "[.[] | select(.databaseId > $ME)] | length")
+          echo "giri più recenti di questo: $piu_recenti"
+          if [ "$piu_recenti" = "0" ]; then gh workflow run aggiorna.yml --repo "$REPO" --ref main; fi

@@ -1,0 +1,8 @@
+# segreti e dati che restano solo sul Mac
+data/chiavi.json
+data/link-privato.txt
+data/garmin-cache.enc.json
+_site/
+node_modules/
+.DS_Store
+.claude/

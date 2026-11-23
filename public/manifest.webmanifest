@@ -1,0 +1,17 @@
+{
+  "name": "Coach Garmin",
+  "short_name": "Coach",
+  "description": "Allenamento del giorno in base a sonno e recupero, piano, dieta e attività dai dati Garmin.",
+  "lang": "it",
+  "scope": "./",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f2f7",
+  "theme_color": "#f2f2f7",
+  "icons": [
+    { "src": "icona-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icona-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icona-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
