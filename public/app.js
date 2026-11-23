@@ -83,7 +83,7 @@ const durata = m => (m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStar
 async function loadData({ quiet = false } = {}) {
   if (loading) return; loading = true; setSpin(true);
   try {
-    const d = await getJSON('api/garmin.json');
+    const d = await getJSON('api/garmin.json?t=' + Date.now());   // evita la copia di 10 minuti di GitHub Pages
     const changed = !DATA || d.updated !== DATA.updated;
     DATA = d;
     if (U.goal) {
@@ -99,18 +99,72 @@ async function loadData({ quiet = false } = {}) {
   } finally { loading = false; setSpin(false); }
 }
 function setSpin(on) { const b = $('#refreshBtn'); if (b) b.classList.toggle('spin', on); }
+// ---------- aggiorna subito (come il ↻ di Rassegna) ----------
+// Online il pulsante fa partire subito il workflow su GitHub con un'autorizzazione salvata su questo dispositivo
+// (permesso solo "Actions" sul repository), poi aspetta i dati nuovi e ricarica da solo.
+const GH_KEY = 'coachgarmin:gh';
+const ghToken = () => store.get(GH_KEY, '');
+const repoInfo = () => { const m = location.hostname.match(/^([^.]+)\.github\.io$/); const r = location.pathname.split('/').filter(Boolean)[0]; return m && r ? { owner: m[1], repo: r } : null; };
+const ghTokenUrl = () => { const r = repoInfo(); return r ? `https://github.com/settings/personal-access-tokens/new?name=${encodeURIComponent('Coach Garmin')}&description=${encodeURIComponent('Pulsante aggiorna della web app Coach Garmin')}&target_name=${encodeURIComponent(r.owner)}&expires_in=none&actions=write` : '#'; };
+let refreshing = null;
 async function refreshNow() {
-  // sul Mac (server locale) chiede subito i dati nuovi a Garmin; online i dati si aggiornano da soli ogni ~15 minuti
-  setSpin(true);
-  try { const r = await fetch('api/refresh', { method: 'POST' }); if (!r.ok) throw 0; } catch { }
-  await loadData();
-  if (DATA?.updated) toast('Dati Garmin di ' + ago(DATA.updated));
+  const r = repoInfo();
+  if (!r) {   // sul Mac (server locale): chiede subito i dati nuovi a Garmin
+    setSpin(true);
+    try { await fetch('api/refresh', { method: 'POST' }); } catch { }
+    await loadData();
+    if (DATA?.updated) toast('Dati Garmin di ' + ago(DATA.updated));
+    return;
+  }
+  if (refreshing) return toast('Sto già aggiornando…');
+  if (!ghToken()) return openGhSetup(() => refreshNow());
+  const before = DATA?.updated || 0;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${r.owner}/${r.repo}/actions/workflows/aggiorna.yml/dispatches`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + ghToken(), Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'main' }),
+    });
+    if (res.status === 401 || res.status === 403 || res.status === 404) { store.set(GH_KEY, ''); toast('Autorizzazione GitHub non valida: ricollegala', 5000); return openGhSetup(() => refreshNow()); }
+    if (!res.ok) throw new Error('GitHub ha risposto ' + res.status);
+  } catch (e) { return toast('Non riesco ad avviare l\'aggiornamento: ' + e.message, 5000); }
+  // aspetta i dati nuovi (di solito 1–2 minuti) mostrando il tempo che passa
+  const t0 = Date.now();
+  refreshing = setInterval(async () => {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    toast(`Aggiorno da Garmin… ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`, 12e3);
+    setSpin(true);
+    let v = null;
+    try { v = await (await fetch('api/version.json?t=' + Date.now(), { cache: 'no-store' })).json(); } catch { }
+    if (v && v.updated > before) {
+      clearInterval(refreshing); refreshing = null;
+      await loadData();
+      toast('Dati Garmin aggiornati adesso');
+    } else if (sec > 300) {
+      clearInterval(refreshing); refreshing = null; setSpin(false);
+      toast('Ci sta mettendo più del solito: i dati arriveranno da soli fra poco.', 5000);
+    }
+  }, 6000);
+}
+function openGhSetup(onDone) {
+  const r = repoInfo();
+  sheet('Aggiorna subito', `<section class="card"><div class="sub" style="display:flex;flex-direction:column;gap:8px">
+    <p style="margin:0">Per aggiornare i dati Garmin sul momento la web app deve poter avviare l'aggiornamento su GitHub. Si fa <b>una volta sola</b> per dispositivo:</p>
+    <p style="margin:0">1. Tocca il pulsante: si apre GitHub con il modulo già compilato.<br>2. In "Repository access" scegli <b>Only select repositories</b> → <b>${esc(r?.repo || '')}</b>; controlla che "Actions" sia <b>Read and write</b>, poi <b>Generate token</b>.<br>3. Copia il codice che inizia con <code>github_pat_</code> e incollalo qui.</p></div>
+    <a class="btn soft" href="${ghTokenUrl()}" target="_blank" rel="noopener">Crea l'autorizzazione su GitHub</a>
+    <input type="text" id="ghTok" placeholder="Incolla qui il codice github_pat_…" autocapitalize="off" autocorrect="off" spellcheck="false" style="border:1.5px solid var(--line);border-radius:12px;padding:12px;background:var(--bg)">
+    <p id="ghMsg" class="tiny" style="margin:0"></p>
+    <div class="tiny">Il codice resta solo su questo dispositivo e può soltanto avviare l'aggiornamento: non vede i tuoi dati. Senza, i dati si aggiornano comunque da soli ogni 15 minuti circa.</div></section>`,
+  { right: 'Salva', left: 'Annulla' });
+  sheet.ok = () => {
+    const t = $('#ghTok').value.trim();
+    if (!/^(github_pat_|ghp_)/.test(t)) { $('#ghMsg').textContent = 'Il codice deve iniziare con github_pat_'; return; }
+    store.set(GH_KEY, t); closeSheet(); onDone && onDone();
+  };
 }
 // controlla le novità quando riapri l'app e ogni 3 minuti mentre è aperta
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { DIET = D.load(); checkVersion(); } });
 setInterval(() => { if (document.visibilityState === 'visible') checkVersion(); }, 180e3);
 async function checkVersion() {
-  try { const v = await (await fetch('api/version.json', { cache: 'no-store' })).json(); if (!DATA || v.updated > DATA.updated) loadData({ quiet: true }); } catch { }
+  try { const v = await (await fetch('api/version.json?t=' + Date.now(), { cache: 'no-store' })).json(); if (!DATA || v.updated > DATA.updated) loadData({ quiet: true }); } catch { }
 }
 
 /** Decisione del giorno: se hai programmato la corsa con l'AI vale lei, come nell'app iPhone. */
@@ -491,6 +545,10 @@ function viewAccount() {
   out.push(`<div class="list-h">Corsa con l'AI (Gemini)</div><div class="list">
     <div class="li"><div class="grow">Chiave Gemini</div><input type="password" id="gemIn" placeholder="incolla la chiave" value="${esc(geminiKey())}" autocomplete="off" style="width:160px;background:var(--fill);border:0;border-radius:8px;padding:6px 10px"></div></div>
     <div class="list-foot">Gratis: crea la chiave su <b>aistudio.google.com/apikey</b> (account Google, "Create API key") e incollala qui. Resta solo su questo dispositivo. Senza chiave la corsa la prepara il coach dalle frasi tipiche.</div>`);
+  if (repoInfo()) out.push(`<div class="list-h">Pulsante aggiorna</div><div class="list">
+    <div class="li"><div class="grow">Aggiornamento immediato</div><b>${ghToken() ? 'attivo' : 'non attivo'}</b></div>
+    <button class="li" style="width:100%;text-align:left${ghToken() ? ';color:var(--red)' : ''}" data-act="${ghToken() ? 'ghoff' : 'ghon'}">${ic(ghToken() ? 'trash' : 'refresh')}<span class="grow">${ghToken() ? 'Scollega GitHub da questo dispositivo' : 'Attiva l\'aggiornamento immediato'}</span></button></div>
+    <div class="list-foot">${ghToken() ? 'Il pulsante ↻ in alto scarica subito i dati da Garmin (1–2 minuti).' : 'Senza, il pulsante ↻ carica l\'ultimo aggiornamento automatico (ogni 15 minuti circa).'}</div>`);
   if (getKey()) out.push(`<div class="list-h">Su iPhone</div><div class="list">
     <button class="li" style="width:100%;text-align:left" data-act="copylink">${ic('person-circle')}<span class="grow">Copia il link privato</span>${ic('chevron-forward', 'chev')}</button>
     <div class="li"><div class="grow sub">Per averla come un'app: in Safari tocca Condividi → <b>Aggiungi alla schermata Home</b> (su iOS 26 è sotto "Visualizza altro"). Si apre a schermo intero, già con l'accesso.</div></div></div>`);
@@ -660,6 +718,8 @@ document.addEventListener('click', async e => {
   if (a === 'sheet-ok') return sheet.ok && sheet.ok();
   if (a === 'reload') return location.reload();
   if (a === 'refresh') return refreshNow();
+  if (a === 'ghon') return openGhSetup(() => { route(); refreshNow(); });
+  if (a === 'ghoff') { store.set(GH_KEY, ''); route(); return toast('GitHub scollegato da questo dispositivo'); }
   if (a === 'checkin') return openCheckIn();
   if (a === 'runai') return openRunAI();
   if (a === 'runai-del') { delete U.aiRuns[k]; saveU(); route(); return toast('Torna l\'allenamento previsto'); }
