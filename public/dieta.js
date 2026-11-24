@@ -10,6 +10,12 @@ export const CATS = {
 };
 export const MEAL_CATS = ['carbo', 'proteine', 'verdura'];
 export const MEALS_PER_WEEK = 14, FREE_ID = 'pasto_libero', FREE_ALLOWED = 1, BREAKFAST_TARGET = 7;
+/** Sgarri: si segnano come il pasto libero e tolgono punti alla riuscita della settimana. */
+export const SGARRI = [{ id: 'sgarro_piccolo', name: 'Sgarro piccolo', points: 2, hint: 'un dolce, uno snack, un aperitivo' }, { id: 'sgarro_grande', name: 'Sgarro grande', points: 5, hint: 'una pizza in più, un\'abbuffata' }];
+export const SPECIAL = new Set([FREE_ID, ...SGARRI.map(x => x.id)]);
+/** Porzioni segnate oltre il programma della settimana (non contano per la riuscita). */
+export const oltre = (s, i) => Math.max(0, (s.eaten[i.id] || 0) - i.weeklyTarget);
+export const raw = (s, i) => s.eaten[i.id] || 0;
 const F = (id, name, portion, weeklyTarget, category, extra = {}) => ({ id, name, portion, weeklyTarget, category, healthy: true, ...extra });
 export const DEFAULT_ITEMS = [
   F('pane', 'Pane', '80 g', 7, 'carbo', { reducedPortion: '60 g' }),
@@ -80,8 +86,8 @@ export function portion(s, i) {
   if (freeMeals(s) > FREE_ALLOWED && i.reducedPortion && i.reducedPortion !== i.portion) return { text: i.reducedPortion, reduced: true };
   return { text: i.portion, reduced: false };
 }
-export function eat(s, id) {
-  if (id !== FREE_ID) { const i = item(s, id); if (!i || remaining(s, i) <= 0) return; }
+export function eat(s, id, { force = false } = {}) {
+  if (!SPECIAL.has(id)) { const i = item(s, id); if (!i || (!force && remaining(s, i) <= 0)) return; }
   s.eaten[id] = (s.eaten[id] || 0) + 1;
   s.lastEaten = id; s.lastEatenAt = Date.now();
   save(s);
@@ -105,10 +111,12 @@ export function score(s, day = dayOfWeek()) {
   const breakfastDone = Math.min(eatenGroupHealthy(s), day);
   const fruitDone = Math.min(eaten(s, item(s, 'frutta')), day);
   const mealsTot = expected * MEAL_CATS.length;
+  const sgarri = SGARRI.map(x => ({ ...x, n: s.eaten[x.id] || 0 })), malus = sgarri.reduce((a, x) => a + x.n * x.points, 0);
   return {
+    sgarri, malus,
     day, mealsExpected: expected, mealsDone, breakfastDone, fruitDone, freeMeals: free, extraFree: Math.max(0, free - FREE_ALLOWED),
     mealsPercent: pct(mealsDone, mealsTot), breakfastPercent: pct(breakfastDone, day), fruitPercent: pct(fruitDone, day),
-    percent: pct(mealsDone + breakfastDone + fruitDone, mealsTot + 2 * day),
+    percent: Math.max(0, pct(mealsDone + breakfastDone + fruitDone, mealsTot + 2 * day) - malus),
   };
 }
 /** A che pasto dovresti essere adesso (dalle 16 conta la cena). */

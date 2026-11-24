@@ -698,9 +698,11 @@ function viewDiet() {
     ${s.lastWeekPercent != null ? `<div class="tiny">Settimana scorsa: ${s.lastWeekPercent}%</div>` : ''}</div></div>
     <div class="grid2">${tiles}</div></section>`);
   const free = D.freeMeals(s);
-  out.push(`<div class="list"><div class="li"><div class="ico-c" style="background:#af52de">${ic('restaurant')}</div><div class="grow"><div class="ttl">Pasto libero</div><div class="sub">${free ? `${free} questa settimana` : 'Nessuno questa settimana'}</div></div>
-    ${free ? `<button class="undo" data-undo="${D.FREE_ID}" aria-label="Togli un pasto libero">${ic('arrow-undo')}</button>` : ''}<button class="btn small" style="width:auto" data-eat="${D.FREE_ID}">Segna</button></div></div>
-    <div class="list-foot">${sc.extraFree > 0 ? `Pasti liberi in più: ${sc.extraFree}. Dal secondo pasto libero le dosi passano a quelle ridotte (indicate in arancione) e la riuscita scende: ogni pasto libero in più occupa un pasto del programma.` : 'Hai 1 pasto libero a settimana: vale come un pasto di carboidrati, proteine e verdura e non abbassa la riuscita.'}</div>`);
+  const specialRow = (id, name, sub, color, icon, n) => `<div class="li"><div class="ico-c" style="background:${color}">${ic(icon)}</div><div class="grow"><div class="ttl">${name}</div><div class="sub">${sub}</div></div>
+    ${n ? `<button class="undo" data-undo="${id}" aria-label="Togli uno">${ic('arrow-undo')}</button>` : ''}<button class="btn small" style="width:auto" data-eat="${id}">Segna</button></div>`;
+  out.push(`<div class="list">${specialRow(D.FREE_ID, 'Pasto libero', free ? `${free} questa settimana` : 'Nessuno questa settimana', '#af52de', 'restaurant', free)}
+    ${sc.sgarri.map((x, k) => specialRow(x.id, x.name, x.n ? `${x.n} questa settimana · −${x.n * x.points} punti` : `−${x.points} punti alla riuscita · ${x.hint}`, k ? '#ff3b30' : '#ff9500', k ? 'warning' : 'fast-food', x.n)).join('')}</div>
+    <div class="list-foot">${sc.extraFree > 0 ? `Pasti liberi in più: ${sc.extraFree}. Dal secondo pasto libero le dosi passano a quelle ridotte (indicate in arancione) e la riuscita scende: ogni pasto libero in più occupa un pasto del programma.` : 'Hai 1 pasto libero a settimana: vale come un pasto di carboidrati, proteine e verdura e non abbassa la riuscita.'} Gli sgarri si aggiungono ai pasti e tolgono punti alla riuscita (piccolo −2, grande −5).</div>`);
   out.push(`<div class="seg">${Object.entries(D.CATS).map(([id, c]) => `<button class="${dietCat === id ? 'on' : ''}" data-cat="${id}">${c.short}</button>`).join('')}</div>`);
   const c = D.CATS[dietCat], all = D.inCat(s, dietCat);
   const just = s.lastEatenAt && Date.now() - s.lastEatenAt < 120e3 ? s.lastEaten : null;
@@ -716,8 +718,8 @@ function viewDiet() {
     }).join('')}</div>`);
   }
   if (dietCat === 'colazione') out.push('<div class="list-foot">Una colazione al giorno: il latte sempre abbinato a biscotti o cereali, oppure lo yogurt. Con 7 colazioni sane la colazione è al 100%. Latte e biscotti non sani e il bar si possono segnare ma non contano. In più un frutto al giorno.</div>');
-  const done = all.filter(i => D.eaten(s, i) > 0);
-  if (done.length) out.push(`<div class="list-h">Già mangiato</div><div class="list">${done.map(i => `<div class="li ${just === i.id ? 'food just' : ''}" style="--cc:${c.color}"><span style="color:${c.color}">${ic('checkmark-circle')}</span><div class="grow"><div class="ttl">${esc(i.name)}</div></div><b class="count">${D.eaten(s, i)}</b><button class="undo" data-undo="${i.id}" aria-label="Togli una spunta">${ic('arrow-undo')}</button></div>`).join('')}</div><div class="list-foot">Tocca la freccia per togliere una spunta messa per sbaglio.</div>`);
+  const done = all.filter(i => D.raw(s, i) > 0);
+  if (done.length) out.push(`<div class="list-h">Già mangiato</div><div class="list">${done.map(i => { const ol = D.oltre(s, i); return `<div class="li ${just === i.id ? 'food just' : ''}" style="--cc:${c.color}"><span style="color:${c.color}">${ic('checkmark-circle')}</span><div class="grow"><div class="ttl">${esc(i.name)}</div>${ol ? `<div class="sub" style="color:var(--orange);font-weight:600">+${ol} oltre il programma</div>` : ''}</div><b class="count">${D.raw(s, i)}/${i.weeklyTarget}</b><button class="undo" data-undo="${i.id}" aria-label="Togli una spunta">${ic('arrow-undo')}</button><button class="undo" data-oltre="${i.id}" aria-label="Segna un'altra porzione" style="color:${c.color}">${ic('add')}</button></div>`; }).join('')}</div><div class="list-foot">La freccia toglie una spunta messa per sbaglio; il + segna un'altra porzione anche se quelle della settimana sono finite (resta "oltre il programma" e non alza la riuscita).</div>`);
   $('#view').innerHTML = out.join('');
 }
 function openDietMenu() {
@@ -742,9 +744,10 @@ function openDoses() {
 /** Conferma della spunta, in basso sopra la barra delle schede (come nel widget): 2 minuti, con Annulla. */
 function eatenBar(id, it) {
   $('#eatBar')?.remove();
-  const c = it ? D.CATS[it.category] : { color: '#af52de', title: 'Pasto libero' }, p = it ? D.portion(DIET, it) : null;
+  const sg = D.SGARRI.find(x => x.id === id), label = it ? it.name : sg ? sg.name : 'Pasto libero';
+  const c = it ? D.CATS[it.category] : { color: sg ? (sg.points > 2 ? '#ff3b30' : '#ff9500') : '#af52de', title: label }, p = it ? D.portion(DIET, it) : null;
   const el = document.createElement('div'); el.id = 'eatBar'; el.style.setProperty('--cc', c.color);
-  el.innerHTML = `<span class="check" style="background:${c.color};color:#fff">${ic('checkmark-circle')}</span><div class="grow"><div class="strong">Segnato: ${esc(it ? it.name : 'Pasto libero')}</div><div class="tiny">${it ? `${esc(p.text || c.title)} · ${D.eaten(DIET, it)}/${it.weeklyTarget} questa settimana` : `${D.freeMeals(DIET)} questa settimana`}</div></div><button class="chip" data-act="eatundo" data-id="${esc(id)}">Annulla</button>`;
+  el.innerHTML = `<span class="check" style="background:${c.color};color:#fff">${ic('checkmark-circle')}</span><div class="grow"><div class="strong">Segnato: ${esc(label)}</div><div class="tiny">${it ? `${esc(p.text || c.title)} · ${D.raw(DIET, it)}/${it.weeklyTarget} questa settimana${D.oltre(DIET, it) ? ' · oltre il programma' : ''}` : sg ? `${DIET.eaten[id] || 0} questa settimana · −${sg.points} punti` : `${D.freeMeals(DIET)} questa settimana`}</div></div><button class="chip" data-act="eatundo" data-id="${esc(id)}">Annulla</button>`;
   document.body.appendChild(el);
   clearTimeout(eatenBar.t); eatenBar.t = setTimeout(() => el.remove(), 120e3);
 }
@@ -1161,7 +1164,7 @@ function openRunAI() {
 
 // ---------- azioni ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-act],[data-kind],[data-mix],[data-week],[data-cat],[data-eat],[data-undo],[data-period],[data-layer]');
+  const t = e.target.closest('[data-act],[data-kind],[data-mix],[data-week],[data-cat],[data-eat],[data-undo],[data-period],[data-layer],[data-oltre]');
   if (!t) { if (e.target.id === 'modal') closeSheet(); return; }
   const a = t.dataset.act, k = C.today();
   if (a === 'close') return closeSheet();
@@ -1231,7 +1234,8 @@ document.addEventListener('click', async e => {
   if (t.dataset.period) { ST.period = t.dataset.period; saveST(); return route(); }
   if (t.dataset.week) { weekOffset += +t.dataset.week; return route(); }
   if (t.dataset.cat) { dietCat = t.dataset.cat; return route(); }
-  if (t.dataset.eat) { const before = DIET.eaten[t.dataset.eat] || 0; D.eat(DIET, t.dataset.eat); const it = D.item(DIET, t.dataset.eat); route(); return (DIET.eaten[t.dataset.eat] || 0) > before ? eatenBar(t.dataset.eat, it) : toast('Hai già raggiunto le porzioni di questa settimana'); }
+  if (t.dataset.oltre) { D.eat(DIET, t.dataset.oltre, { force: true }); route(); return eatenBar(t.dataset.oltre, D.item(DIET, t.dataset.oltre)); }
+  if (t.dataset.eat) { const before = DIET.eaten[t.dataset.eat] || 0; D.eat(DIET, t.dataset.eat); const it = D.item(DIET, t.dataset.eat); route(); return (DIET.eaten[t.dataset.eat] || 0) > before ? eatenBar(t.dataset.eat, it) : toast('Porzioni della settimana finite: usa il + in "Già mangiato" per segnarne un\'altra'); }
   if (a === 'eatundo') { D.undo(DIET, t.dataset.id); $('#eatBar')?.remove(); return route(); }
   if (t.dataset.undo) { D.undo(DIET, t.dataset.undo); return route(); }
 });
