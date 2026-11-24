@@ -33,11 +33,13 @@ export const DEFAULT_ITEMS = [
   F('legumi', 'Legumi', '1 porzione', 1, 'proteine'),
   F('verdura', 'Verdura', '200 g', 13, 'verdura'),
   F('latte_biscotti_sani', 'Latte + biscotti sani', '', 7, 'colazione', { group: 'colazioni' }),
+  F('te_biscotti', 'Tè e biscotti', '', 7, 'colazione', { group: 'colazioni' }),
   F('latte_cereali', 'Latte + cereali', '', 7, 'colazione', { group: 'colazioni' }),
   F('yogurt', 'Yogurt', '1 vasetto', 7, 'colazione', { group: 'colazioni' }),
   F('yogurt_cereali', 'Yogurt + cereali', '', 7, 'colazione', { group: 'colazioni' }),
   F('latte_biscotti_non_sani', 'Latte + biscotti non sani', 'da evitare', 7, 'colazione', { group: 'colazioni', healthy: false }),
   F('bar', 'Bar', 'da evitare', 7, 'colazione', { group: 'colazioni', healthy: false }),
+  F('colazione_saltata', 'Colazione saltata', 'conta tra le colazioni, non per la riuscita', 7, 'colazione', { group: 'colazioni', healthy: false }),
   F('frutta', 'Frutta', '1 porzione', 7, 'colazione'),
 ];
 
@@ -73,7 +75,7 @@ export const freeMeals = s => s.eaten[FREE_ID] || 0;
 
 export function progress(s, cat) {
   if (cat === 'colazione') return { done: eatenGroup(s), total: BREAKFAST_TARGET };
-  return { done: inCat(s, cat).reduce((a, i) => a + eaten(s, i), 0) + freeMeals(s), total: MEALS_PER_WEEK };
+  return { done: Math.min(MEALS_PER_WEEK, inCat(s, cat).reduce((a, i) => a + raw(s, i), 0) + freeMeals(s)), total: MEALS_PER_WEEK };
 }
 export function remaining(s, i) {
   const own = i.weeklyTarget - eaten(s, i);
