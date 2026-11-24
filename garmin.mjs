@@ -231,6 +231,21 @@ const num = v => (typeof v === 'number' && isFinite(v) ? v : typeof v === 'strin
 const int = v => { const n = num(v); return n == null ? null : Math.round(n); };
 const clean = o => { for (const k of Object.keys(o)) if (o[k] == null) delete o[k]; return o; };
 
+/** La notte minuto per minuto (per il grafico): fasi, battito, HRV, Body Battery e stress, in forma compatta. */
+function readNight(sl) {
+  const dto = sl?.dailySleepDTO || {};
+  if (!dto.sleepStartTimestampGMT || !Array.isArray(sl.sleepLevels) || !sl.sleepLevels.length) return null;
+  const ms = v => (typeof v === 'number' ? v : gmt(v));
+  const thin = (arr, n) => (arr.length <= n ? arr : arr.filter((_, i) => i % Math.ceil(arr.length / n) === 0));
+  const series = arr => thin((arr || []).filter(x => x?.value != null && x.startGMT != null).map(x => [ms(x.startGMT), Math.round(x.value)]), 160);
+  return {
+    start: dto.sleepStartTimestampGMT, end: dto.sleepEndTimestampGMT,
+    // 0 profondo · 1 leggero · 2 REM · 3 sveglio
+    levels: sl.sleepLevels.map(l => [ms(l.startGMT), ms(l.endGMT), Math.round(l.activityLevel)]).filter(l => l[0] && l[1]),
+    hr: series(sl.sleepHeartRate), hrv: series(sl.hrvData), bb: series(sl.sleepBodyBattery), stress: series(sl.sleepStress),
+    restless: sl.restlessMomentsCount ?? null, awakeCount: dto.awakeCount ?? null,
+  };
+}
 function readNaps(sl, d) {
   const naps = sl?.dailyNapDTOS || [];
   const time = v => (typeof v === 'number' ? v : gmt(v));
@@ -279,6 +294,7 @@ async function fetchDay(k, name) {
     d.hrv = int(sl.avgOvernightHrv) ?? d.hrv;
     d.restingHR = d.restingHR ?? int(sl.restingHeartRate);
     readNaps(sl, d);
+    const night = readNight(sl); if (night) d.night = night;
   }
   const h = await opt(`/hrv-service/hrv/${k}`);
   if (h?.hrvSummary) {
@@ -418,6 +434,16 @@ export async function sync({ days = 3 } = {}) {
       if (st) c.cirqa = { deviceId: cirqa.id, name: cirqa.name, alarms: Array.isArray(st.alarms) ? st.alarms : [], mountingSide: st.mountingSide || null, at: Date.now() };
     }
     if (!c.profilePk) { const p = await opt('/userprofile-service/socialProfile'); c.profilePk = p?.profileId ?? p?.id ?? null; }
+    // grafico del sonno: completa le ultime 3 settimane (5 notti a giro) e lo toglie dai giorni più vecchi
+    let nights = 0;
+    for (let i = 0; i < 21 && nights < 5; i++) {
+      const k = addDays(today(), -i), d = c.days[k];
+      if (!d || d.night || d.noNight || d.sleepHours == null) continue;
+      const sl = await opt(`/wellness-service/wellness/dailySleepData/${name}`, { date: k, nonSleepBufferMinutes: '60' });
+      const n = readNight(sl); if (n) d.night = n; else d.noNight = 1;
+      nights++;
+    }
+    for (const [k, d] of Object.entries(c.days)) if (d.night && k < addDays(today(), -21)) delete d.night;
     // tiene al massimo ~14 mesi di giorni
     const min = addDays(today(), -430);
     for (const k of Object.keys(c.days)) if (k < min) delete c.days[k];

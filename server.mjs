@@ -37,6 +37,14 @@ function demoData() {
     if ([0, 6].includes(wd) && rnd() < 0.6) activities.push({ id: 'g' + i, key: k, type: 'Gravel', minutes: 100 + Math.round(rnd() * 80), km: Math.round(40 + rnd() * 40), avgHR: 125 + Math.round(rnd() * 10), trainingEffect: 3 + rnd(), trainingLoad: 120 + rnd() * 80, elevationGain: 400 + rnd() * 600, startTime: Date.parse(k + 'T09:00'), garminName: 'Gravel Langhe' });
     if (wd === 2 && rnd() < 0.5) activities.push({ id: 'c' + i, key: k, type: 'Corsa', minutes: 35 + Math.round(rnd() * 15), km: Math.round((5 + rnd() * 3) * 10) / 10, avgHR: 140 + Math.round(rnd() * 10), trainingEffect: 2.8, trainingLoad: 60, startTime: Date.parse(k + 'T07:00'), garminName: 'Corsa' });
   }
+  // notti di prova per il grafico del sonno: fasi a cicli di ~90 minuti
+  for (const d of days.slice(-7)) {
+    const start = Date.parse(addDays(d.key, -1) + 'T23:10:00'), end = start + d.sleepHours * 3600e3, levels = [];
+    let t = start, i = 0; const pat = [1, 0, 1, 2, 1, 3, 1, 0, 1, 2];
+    while (t < end) { const len = (8 + ((i * 7) % 23)) * 60e3; levels.push([t, Math.min(end, t + len), pat[i % pat.length]]); t += len; i++; }
+    const ser = (base, amp) => Array.from({ length: 80 }, (_, j) => [start + (end - start) * j / 79, Math.round(base + amp * Math.sin(j / 9))]);
+    d.night = { start, end, levels, hr: ser(54, 6), hrv: ser(45, 10), bb: ser(30, 25).map(([x, v], j) => [x, 20 + j]), stress: ser(18, 8) };
+  }
   activities.sort((a, b) => b.startTime - a.startTime);
   return { updated: Date.now() - 4 * 60e3, error: null, profile: { name: 'Prova' }, demo: true, mywhoosh: null, mwFtp: 147, cirqa: { deviceId: '1', name: 'CIRQA', mountingSide: 'RIGHT_UPPER_ARM', alarms: [{ alarmId: 1, alarmTime: 330, alarmDays: ['M', 'Tu', 'W', 'Th', 'F'], alarmMode: 'ON', alarmSound: 'VIBRATION', backlight: 'ON' }] }, runWorkouts: {}, days, activities, devices: [{ id: '1', name: 'CIRQA' }, { id: '2', name: 'Forerunner 255' }], ftp: 215 };
 }

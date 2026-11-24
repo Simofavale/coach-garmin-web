@@ -309,6 +309,8 @@ function viewToday() {
     ${tile('FC a riposo', 'heart', '#ff3b30', t?.restingHR, 'bpm', t?.stressAvg != null ? `stress medio ${t.stressAvg}` : '', 'fc')}
     ${tile('Stato di salute', 'medkit', C.LIGHT[h.light].color, `<span style="font-size:18px">${esc(h.label)}</span>`, '', h.items.filter(i => !i.normal).map(i => i.name).join(', ') || h.items.map(i => i.name).join(' · '), 'salute')}
   </div>`);
+  // il sonno della notte, interattivo
+  out.push(sleepCard());
   // decisione
   const w = dec.workout;
   let hero = `<div class="hero-top"><div class="ring">${ring((rec.recovery || 0) / 100, L.color)}<div class="rv"><b>${rec.recovery ?? '–'}</b><span>${rec.source === 'coach' ? 'prontezza' : 'stima'}</span></div></div>
@@ -350,6 +352,7 @@ function viewToday() {
   out.push(card('Oggi nel pratico', 'checkmark-circle', dec.practical.map((p, i) => `<div class="bullet"><span class="chip" style="min-width:22px;text-align:center;align-self:flex-start">${i + 1}</span><span>${esc(p)}</span></div>`).join('')));
   if (dec.dataWarnings.length) out.push(card('Controllo dati', 'warning', dec.dataWarnings.map(x => bullet(x, 'information-circle', 'var(--orange)')).join('')));
   $('#view').innerHTML = out.join('');
+  bindSleep();
 }
 /** Le tre parti della Prontezza: notte (stile WHOOP), tendenza HRV 7 giorni, readiness Garmin del mattino. */
 function partsBars(rec) {
@@ -357,6 +360,79 @@ function partsBars(rec) {
   const row = (label, v, extra = '') => v == null ? '' : `<div class="part"><span>${label}</span><i><b style="width:${v}%;background:${C.LIGHT[C.lightFrom(v)].color}"></b></i><em class="mono">${v}</em>${extra}</div>`;
   const out = row('Notte', p.notte) + row('Tendenza', p.tendenza) + row('Garmin', p.garmin, p.garminOra != null && p.garminOra !== p.garmin ? `<small>ora ${p.garminOra}</small>` : '');
   return out ? `<div class="parts">${out}</div>` : `<p class="sub" style="margin:8px 0 0">${esc(rec.recovery != null ? 'Stima dai dati di stanotte' : 'Dati insufficienti')}</p>`;
+}
+// ---------- grafico del sonno (ipnogramma) ----------
+const PHASES = [['Profondo', '#2b3fa8'], ['Leggero', '#4f8ff7'], ['REM', '#b061e8'], ['Sveglio', '#f2b92d']];
+const SLEEP_LAYERS = [['hr', 'Battito', '#ff3b30', 'bpm'], ['bb', 'Batteria', '#30b0c7', ''], ['hrv', 'HRV', '#ff2d55', 'ms'], ['stress', 'Stress', '#ff9500', '']];
+let sleepIdx = 0, sleepLayer = 'hr';
+const nights = () => DATA.days.filter(d => d.night).slice().reverse();
+function sleepCard() {
+  const list = nights();
+  if (!list.length) return '';
+  sleepIdx = Math.min(sleepIdx, list.length - 1);
+  const d = list[sleepIdx], n = d.night;
+  const tot = [0, 0, 0, 0]; for (const [a, b, l] of n.levels) tot[l] += (b - a) / 60e3;
+  const asleep = n.levels.find(l => l[2] !== 3)?.[0] ?? n.start, woke = [...n.levels].reverse().find(l => l[2] !== 3)?.[1] ?? n.end;
+  const wakes = n.levels.filter((l, i) => l[2] === 3 && i > 0 && i < n.levels.length - 1).length;
+  const all = (n.end - n.start) / 60e3;
+  return `<section class="card" id="sleepCard">
+    <div class="week-head"><button data-act="nightprev" aria-label="Notte prima" ${sleepIdx >= list.length - 1 ? 'disabled style="opacity:.3"' : ''}>${ic('chevron-back')}</button>
+      <span style="display:flex;align-items:center;gap:6px;font-size:15px">${ic('moon')}Notte di ${C.pretty(C.addDays(d.key, -1), 'day').toLowerCase()}</span>
+      <button data-act="nightnext" aria-label="Notte dopo" ${sleepIdx === 0 ? 'disabled style="opacity:.3"' : ''}>${ic('chevron-forward')}</button></div>
+    <div class="sleep-top">
+      <div><div class="k">Addormentato</div><div class="v mono">${hhmm(asleep)}</div></div>
+      <div><div class="k">Sveglio</div><div class="v mono">${hhmm(woke)}</div></div>
+      <div><div class="k">Dormito</div><div class="v mono">${d.sleepHours != null ? C.hm(d.sleepHours) : '–'}</div></div>
+      <div><div class="k">Risvegli</div><div class="v mono">${wakes}</div></div>
+    </div>
+    <div class="hyp" id="hyp">${hypnogram(n)}<div class="hyp-cursor" hidden></div></div>
+    <div class="hyp-info" id="hypInfo"><span class="tiny">Tocca o trascina il dito sul grafico per vedere ogni momento della notte.</span></div>
+    <div class="seg">${SLEEP_LAYERS.filter(([k]) => n[k]?.length).map(([k, l]) => `<button class="${sleepLayer === k ? 'on' : ''}" data-layer="${k}">${l}</button>`).join('')}</div>
+    <div class="phases">${PHASES.map(([l, c], i) => `<div><span class="dot" style="background:${c}"></span><span class="grow">${l}</span><b class="mono" style="white-space:nowrap">${hmin(Math.round(tot[i]))}</b><span class="tiny">${Math.round(tot[i] / all * 100)}%</span></div>`).join('')}</div>
+  </section>`;
+}
+/** SVG: fasi a gradini (sveglio in alto, profondo in basso) + la curva scelta sotto. */
+function hypnogram(n) {
+  const W = 340, H = 150, top = 6, rowH = 22, rows = 4, t0 = n.start, t1 = n.end, X = t => ((t - t0) / (t1 - t0)) * W;
+  const rowY = l => top + (3 - l) * rowH;
+  let bars = '', path = '';
+  n.levels.forEach(([a, b, l], i) => {
+    const x = X(a), w = Math.max(0.8, X(b) - X(a)), y = rowY(l);
+    bars += `<rect x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${rowH - 3}" rx="3" fill="${PHASES[l][1]}"/>`;
+    path += `${i ? 'L' : 'M'}${x.toFixed(1)},${y + rowH / 2 - 1.5}L${(x + w).toFixed(1)},${y + rowH / 2 - 1.5}`;
+  });
+  const lay = SLEEP_LAYERS.find(([k]) => k === sleepLayer && n[k]?.length) || SLEEP_LAYERS.find(([k]) => n[k]?.length);
+  let curve = '';
+  if (lay) {
+    const pts = n[lay[0]], ys = pts.map(p => p[1]), lo = Math.min(...ys), hi = Math.max(...ys), cy0 = top + rows * rowH + 8, ch = H - cy0 - 14;
+    const Y = v => cy0 + ch - ((v - lo) / (hi - lo || 1)) * ch;
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('');
+    curve = `<path d="${line}" fill="none" stroke="${lay[2]}" stroke-width="1.6" stroke-linejoin="round"/><text x="2" y="${cy0 + 7}" class="hyp-lbl">${hi}</text><text x="2" y="${cy0 + ch}" class="hyp-lbl">${lo}</text>`;
+  }
+  let ticks = ''; const h0 = new Date(t0); h0.setMinutes(0, 0, 0);
+  for (let t = +h0 + 3600e3; t < t1; t += 3600e3) { const x = X(t); ticks += `<line x1="${x}" x2="${x}" y1="${top}" y2="${H - 12}" class="hyp-grid"/><text x="${x}" y="${H - 1}" class="hyp-lbl" text-anchor="middle">${new Date(t).getHours()}</text>`; }
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="hyp-svg">${ticks}<path d="${path}" fill="none" stroke="var(--line)" stroke-width="1"/>${bars}${curve}</svg>
+    <div class="hyp-rows">${PHASES.slice().reverse().map(([l]) => `<span>${l}</span>`).join('')}</div>`;
+}
+function redrawSleep() { const c = $('#sleepCard'); if (!c) return; c.outerHTML = sleepCard(); bindSleep(); }
+function bindSleep() {
+  const box = $('#hyp'); if (!box) return;
+  const n = nights()[sleepIdx]?.night; if (!n) return;
+  const cur = box.querySelector('.hyp-cursor'), info = $('#hypInfo'), svg = box.querySelector('svg');
+  const near = (arr, t) => { if (!arr?.length) return null; let b = arr[0]; for (const p of arr) if (Math.abs(p[0] - t) < Math.abs(b[0] - t)) b = p; return Math.abs(b[0] - t) < 15 * 60e3 ? b[1] : null; };
+  const show = ev => {
+    const pt = ev.touches?.[0] || ev, r = svg.getBoundingClientRect(), x = Math.max(0, Math.min(r.width, pt.clientX - r.left));
+    const t = n.start + (x / r.width) * (n.end - n.start);
+    const seg = n.levels.find(([a, b]) => t >= a && t < b) || n.levels[n.levels.length - 1];
+    const [l, c] = PHASES[seg[2]];
+    cur.hidden = false; cur.style.left = `${x}px`;
+    const extra = SLEEP_LAYERS.map(([k, lab, , u]) => { const v = near(n[k], t); return v != null ? `${lab} <b>${v}${u ? ' ' + u : ''}</b>` : null; }).filter(Boolean).join(' · ');
+    info.innerHTML = `<span class="dot" style="background:${c}"></span><b class="mono">${hhmm(t)}</b> <b style="color:${c}">${l}</b> <span class="tiny">da ${hhmm(seg[0])} a ${hhmm(seg[1])} (${durata(Math.round((seg[1] - seg[0]) / 60e3))})</span><div class="tiny">${extra}</div>`;
+    if (ev.cancelable && ev.type === 'touchmove') ev.preventDefault();
+  };
+  box.addEventListener('pointerdown', show);
+  box.addEventListener('pointermove', e => { if (e.buttons || e.pointerType !== 'mouse') show(e); });
+  box.addEventListener('touchmove', show, { passive: false });
 }
 const hrvStatus = s => ({ BALANCED: 'bilanciata', LOW: 'bassa', UNBALANCED: 'sbilanciata', POOR: 'scarsa' })[String(s).toUpperCase()] || String(s).toLowerCase();
 const feedback = s => String(s).replace(/_/g, ' ').toLowerCase().replace(/^\w/, c => c.toUpperCase());
@@ -1085,7 +1161,7 @@ function openRunAI() {
 
 // ---------- azioni ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-act],[data-kind],[data-mix],[data-week],[data-cat],[data-eat],[data-undo],[data-period]');
+  const t = e.target.closest('[data-act],[data-kind],[data-mix],[data-week],[data-cat],[data-eat],[data-undo],[data-period],[data-layer]');
   if (!t) { if (e.target.id === 'modal') closeSheet(); return; }
   const a = t.dataset.act, k = C.today();
   if (a === 'close') return closeSheet();
@@ -1106,6 +1182,8 @@ document.addEventListener('click', async e => {
   if (a === 'runai-del') { delete U.aiRuns[k]; saveU(); route(); return toast('Torna l\'allenamento previsto'); }
   if (a === 'mwupload') return mwUpload();
   if (a === 'mwlib') return mwLibrary();
+  if (a === 'nightprev') { sleepIdx++; return redrawSleep(); }
+  if (a === 'nightnext') { sleepIdx = Math.max(0, sleepIdx - 1); return redrawSleep(); }
   if (a === 'naps') return openNaps();
   if (a === 'napnew') return openNapForm();
   if (a === 'napedit') return openNapForm(t.dataset.day, +t.dataset.start, +t.dataset.end);
@@ -1149,6 +1227,7 @@ document.addEventListener('click', async e => {
   if (a === 'wipe') { if (confirm('Cancellare piano, check-in e dieta da questo dispositivo?')) { localStorage.removeItem(UKEY); localStorage.removeItem('coachgarmin:dieta'); location.reload(); } return; }
   if (t.dataset.kind && U.goal) { U.goal.kind = t.dataset.kind; saveU(); return route(); }
   if (t.dataset.mix && U.goal) { U.goal.mix = t.dataset.mix; saveU(); return route(); }
+  if (t.dataset.layer) { sleepLayer = t.dataset.layer; return redrawSleep(); }
   if (t.dataset.period) { ST.period = t.dataset.period; saveST(); return route(); }
   if (t.dataset.week) { weekOffset += +t.dataset.week; return route(); }
   if (t.dataset.cat) { dietCat = t.dataset.cat; return route(); }
